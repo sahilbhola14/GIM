@@ -9,7 +9,7 @@ import numpy as np
 import sys
 from mpi4py import MPI
 sys.path.append("../forward_model")
-sys.path.append("/home/sbhola/GIM/information_metrics")
+sys.path.append("../../../information_metrics")
 
 from rht_true import compute_prediction
 from sample_based_mutual_information import approx_mutual_information, approx_conditional_mutual_information
@@ -43,6 +43,8 @@ class inference():
             noise = np.sqrt(self.model_noise_cov_scalar)*np.random.randn(
                 self.num_samples*(self.spatial_resolution-2)).reshape(-1, self.num_samples)
             self.ytrain[1:-1, :] += noise
+            if rank == 0:
+                np.save("ytrain.npy", self.ytrain)
 
         else:
             self.ytrain = loaded_ytrain
@@ -196,8 +198,10 @@ def main():
     alpha_true = 3*np.pi/200
     gamma_true = 1
     delta_true = 5
+    # loaded_ytrain = None
+    # theta_mle = None 
     loaded_ytrain = np.load('ytrain.npy')
-    breakpoint()
+    theta_mle = np.load('theta_mle.npy') 
 
     true_theta = np.array([alpha_true, gamma_true, delta_true])
 
@@ -224,19 +228,18 @@ def main():
     )
 
     # MLE
-    # theta_mle = model.compute_mle()
-    theta_mle = true_theta
+    if theta_mle is None:
+        theta_mle = model.compute_mle()
 
-    if rank == 0:
-        np.save("theta_mle.npy", theta_mle)
-        np.save("ytrain.npy",model.ytrain)
+        if rank == 0:
+            np.save("theta_mle.npy", theta_mle)
 
     # Update the prior
     model.update_prior(theta_mle)
 
     # Model identifiability
-    # model.compute_estimated_mutual_information()
-    # model.compute_estimated_conditional_mutual_information()
+    model.compute_estimated_mutual_information()
+    model.compute_estimated_conditional_mutual_information()
 
     # if rank == 0:
     #     # Emmissivity
