@@ -9,7 +9,7 @@ import numpy as np
 import sys
 from mpi4py import MPI
 sys.path.append("../forward_model")
-sys.path.append("/home/sbhola/Documents/CASLAB/GIM/information_metrics")
+sys.path.append("/home/sbhola/GIM/information_metrics")
 
 from rht_true import compute_prediction
 from sample_based_mutual_information import approx_mutual_information, approx_conditional_mutual_information
@@ -24,7 +24,7 @@ size = comm.Get_size()
 
 
 class inference():
-    def __init__(self, xtrain, model_noise_cov_scalar, true_theta, objective_scaling, prior_mean, prior_cov, num_outer_samples, num_inner_samples):
+    def __init__(self, xtrain, model_noise_cov_scalar, true_theta, objective_scaling, prior_mean, prior_cov, num_outer_samples, num_inner_samples, loaded_ytrain=None):
         self.xtrain = xtrain
         self.model_noise_cov_scalar = model_noise_cov_scalar
         self.num_samples = self.xtrain.shape[0]
@@ -35,13 +35,20 @@ class inference():
         self.objective_scaling = objective_scaling
         self.num_outer_samples = num_outer_samples
         self.num_inner_samples = num_inner_samples
+        
+        if loaded_ytrain is None:
+            self.ytrain = self.compute_model_prediction(theta=self.true_theta)
+            self.spatial_resolution = self.ytrain.shape[0]
 
-        self.ytrain = self.compute_model_prediction(theta=self.true_theta)
+            noise = np.sqrt(self.model_noise_cov_scalar)*np.random.randn(
+                self.num_samples*(self.spatial_resolution-2)).reshape(-1, self.num_samples)
+            self.ytrain[1:-1, :] += noise
 
-        self.spatial_resolution = self.ytrain.shape[0]
-        noise = np.sqrt(self.model_noise_cov_scalar)*np.random.randn(
-            self.num_samples*(self.spatial_resolution-2)).reshape(-1, self.num_samples)
-        self.ytrain[1:-1, :] += noise
+        else:
+            self.ytrain = loaded_ytrain
+            self.spatial_resolution = self.ytrain.shape[0]
+
+
 
         self.model_noise_cov_mat = self.model_noise_cov_scalar * \
             np.eye(self.spatial_resolution)
@@ -95,10 +102,12 @@ class inference():
             return -self.compute_log_likelihood(theta)
 
         res = minimize(objective_func, np.random.randn(
-            self.num_parameters), method="Nelder-Mead")
+            self.num_parameters), method="Nelder-Mead", options={'maxiter':500})
         res = minimize(objective_func, res.x)
         self.write_log_file("MLE computation finished!!!")
         self.write_log_file("Theta MLE : {} | Success : {}".format(res.x, res.success))
+        comm.Barrier()
+        self.write_log_file("Converged at all procs.")
 
         return res.x
 
@@ -112,11 +121,11 @@ class inference():
 
     def extract_prameters(self, theta):
         """Function extracts the parameters"""
-        # alpha = theta[0]
+        alpha = theta[0]
         gamma = theta[1]
         delta = theta[2]
 
-        alpha = 3*np.pi/200
+        # alpha = 3*np.pi/200
         # gamma = 1
         # delta = 5
 
@@ -187,6 +196,8 @@ def main():
     alpha_true = 3*np.pi/200
     gamma_true = 1
     delta_true = 5
+    loaded_ytrain = np.load('ytrain.npy')
+    breakpoint()
 
     true_theta = np.array([alpha_true, gamma_true, delta_true])
 
@@ -197,8 +208,8 @@ def main():
     xtrain = np.array([50])
     model_noise_cov_scalar = 1e-1
     objective_scaling = 1e-10
-    num_outer_samples = 100
-    num_inner_samples = 100
+    num_outer_samples = 40
+    num_inner_samples = 20
 
     model = inference(
         xtrain=xtrain,
@@ -208,7 +219,8 @@ def main():
         prior_mean=prior_mean,
         prior_cov=prior_cov,
         num_outer_samples=num_outer_samples,
-        num_inner_samples=num_inner_samples
+        num_inner_samples=num_inner_samples,
+        loaded_ytrain = loaded_ytrain
     )
 
     # MLE
@@ -217,13 +229,14 @@ def main():
 
     if rank == 0:
         np.save("theta_mle.npy", theta_mle)
+        np.save("ytrain.npy",model.ytrain)
 
     # Update the prior
     model.update_prior(theta_mle)
 
     # Model identifiability
-    model.compute_estimated_mutual_information()
-    model.compute_estimated_conditional_mutual_information()
+    # model.compute_estimated_mutual_information()
+    # model.compute_estimated_conditional_mutual_information()
 
     # if rank == 0:
     #     # Emmissivity
