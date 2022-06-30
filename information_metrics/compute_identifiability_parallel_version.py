@@ -1,9 +1,10 @@
 import numpy as np
 from mpi4py import MPI
+import matplotlib.pyplot as plt
 import sys
 from itertools import combinations
 import os
-sys.path.append("../examples/linear_gaussian")
+sys.path.append("/home/sbhola/Documents/CASLAB/GIM/quadrature")
 from quadrature import unscented_quadrature, gauss_hermite_quadrature
 
 comm = MPI.COMM_WORLD
@@ -115,7 +116,7 @@ class mutual_information():
         cov = np.diag(np.diag(self.prior_cov)[parameter_pair])
         return mean, cov
 
-    def compute_model_prediction(self, theta, write_label_format=None):
+    def compute_model_prediction(self, theta):
         """Function computes the model prediction"""
         num_samples = theta.shape[1]
         prediction = np.zeros(self.ytrain.shape+(num_samples, ))

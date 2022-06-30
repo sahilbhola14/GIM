@@ -7,16 +7,18 @@ import matplotlib.pyplot as plt
 import matplotlib
 import numpy as np
 import sys
+import os
 from mpi4py import MPI
+from matplotlib.ticker import (MultipleLocator, AutoMinorLocator)
 sys.path.append("../forward_model")
 sys.path.append("../../../information_metrics")
 
 from rht_true import compute_prediction
-from sample_based_mutual_information import approx_mutual_information, approx_conditional_mutual_information
+from compute_identifiability_parallel_version import conditional_mutual_information
 
 plt.rc('text', usetex=True)
-plt.rc('font', family='sans-serif', size=20)
-matplotlib.rcParams['font.family'] = 'sans-serif'
+plt.rc('font', family='serif', size=20)
+matplotlib.rcParams['font.family'] = 'serif'
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
@@ -27,7 +29,7 @@ class inference():
     def __init__(self, xtrain, model_noise_cov_scalar, true_theta, objective_scaling, prior_mean, prior_cov, num_outer_samples, num_inner_samples, loaded_ytrain=None):
         self.xtrain = xtrain
         self.model_noise_cov_scalar = model_noise_cov_scalar
-        self.num_samples = self.xtrain.shape[0]
+        self.num_data_samples = self.xtrain.shape[0]
         self.true_theta = true_theta
         self.prior_mean = prior_mean
         self.prior_cov = prior_cov
@@ -35,30 +37,30 @@ class inference():
         self.objective_scaling = objective_scaling
         self.num_outer_samples = num_outer_samples
         self.num_inner_samples = num_inner_samples
-        
+
         if loaded_ytrain is None:
             self.ytrain = self.compute_model_prediction(theta=self.true_theta)
-            self.spatial_resolution = self.ytrain.shape[0]
+            self.spatial_res = self.ytrain.shape[1]
 
             noise = np.sqrt(self.model_noise_cov_scalar)*np.random.randn(
-                self.num_samples*(self.spatial_resolution-2)).reshape(-1, self.num_samples)
-            self.ytrain[1:-1, :] += noise
+                self.num_data_samples*(self.spatial_res-2)).reshape(self.num_data_samples, -1)
+            self.ytrain[:, 1:-1] += noise
             if rank == 0:
                 np.save("ytrain.npy", self.ytrain)
 
         else:
             self.ytrain = loaded_ytrain
-            self.spatial_resolution = self.ytrain.shape[0]
-
-
+            self.spatial_res = self.ytrain.shape[0]
 
         self.model_noise_cov_mat = self.model_noise_cov_scalar * \
-            np.eye(self.spatial_resolution)
-        self.spatial_field = np.linspace(0, 1, self.spatial_resolution)
+            np.eye(self.spatial_res)
+        self.spatial_field = np.linspace(0, 1, self.spatial_res)
 
         # Initialize the log file
         if rank == 0:
             self.log_file = open("log_file.dat", "w")
+        else:
+            self.log_file = None
 
     def compute_model_prediction(self, theta):
         """Function computes the model prediciton"""
@@ -66,7 +68,7 @@ class inference():
         alpha, gamma, delta = self.extract_prameters(theta)
 
         T_prediction = []
-        for isample in range(self.num_samples):
+        for isample in range(self.num_data_samples):
             T_inf = self.xtrain[isample]
             T_prediction.append(
                 compute_prediction(
@@ -77,7 +79,7 @@ class inference():
                 )
             )
 
-        T_prediction = np.array(T_prediction).T
+        T_prediction = np.array(T_prediction)
 
         return T_prediction
 
@@ -85,12 +87,12 @@ class inference():
         """Function comptues the log likelihood (unnormalized)"""
         prediction = self.compute_model_prediction(theta)
         error = self.ytrain - prediction
-        error_norm_sq = np.linalg.norm(error, axis=0)**2
+        error_norm_sq = np.linalg.norm(error, axis=1)**2
         if self.model_noise_cov_scalar != 0:
             log_likelihood = -0.5 * \
-                np.sum(error_norm_sq / self.model_noise_cov_scalar)
+                np.sum(error_norm_sq / self.model_noise_cov_scalar, axis=0)
         else:
-            log_likelihood = -0.5*np.sum(error_norm_sq)
+            log_likelihood = -0.5*np.sum(error_norm_sq, axis=0)
         scaled_log_likelihood = self.objective_scaling*log_likelihood
 
         self.write_log_file("Scaled Log likelihood : {0:.5e} at theta : {1}".format(
@@ -117,7 +119,7 @@ class inference():
         """Function computes the emmissivity"""
         alpha, gamma, delta = self.extract_prameters(theta)
 
-        T = np.linspace(10, 100, 100)
+        T = np.linspace(20, 100, 200)
 
         return 1e-4 * (gamma + delta*np.sin(alpha*T) + np.exp(0.02*T))
 
@@ -141,47 +143,22 @@ class inference():
         else:
             pass
 
-    def compute_estimated_mutual_information(self):
-        """Function computes the estimated mutual information"""
+    def estimate_parameter_conditional_mutual_information(self):
+        """Function computes the individual mutual information, I(theta_i;Y|theta_[rest of parameters])"""
+        estimator = conditional_mutual_information(
+                forward_model=self.compute_model_prediction,
+                prior_mean=self.prior_mean,
+                prior_cov=self.prior_cov,
+                model_noise_cov_scalar=self.model_noise_cov_scalar,
+                global_num_outer_samples=self.num_outer_samples,
+                global_num_inner_samples=self.num_inner_samples,
+                ytrain=self.ytrain,
+                save_path=os.getcwd(),
+                log_file=self.log_file
+                )
 
-        self.write_log_file("Begin Mutual information extimation")
-        sample_based_approximator = approx_mutual_information(
-            forward_model=self.compute_model_prediction,
-            eval_mean=self.prior_mean,
-            eval_cov=self.prior_cov,
-            model_noise_cov_scalar=self.model_noise_cov_scalar,
-            num_outer_samples=self.num_outer_samples,
-            num_inner_samples=self.num_inner_samples,
-            log_file=self.log_file if rank == 0 else None
-        )
-
-        estimated_mutual_information = sample_based_approximator.estimate_individual_mutual_information()
-
-        if rank == 0:
-            np.save("estimated_mutual_information.npy", estimated_mutual_information)
-
-        self.write_log_file("End Mutual information estimation")
-
-    def compute_estimated_conditional_mutual_information(self):
-        """Function computes the estimated conditional mutual information"""
-
-        self.write_log_file("Begin Conditional mutual information extimation")
-        sample_based_approximator = approx_conditional_mutual_information(
-            forward_model=self.compute_model_prediction,
-            eval_mean=self.prior_mean,
-            eval_cov=self.prior_cov,
-            model_noise_cov_scalar=self.model_noise_cov_scalar,
-            num_outer_samples=self.num_outer_samples,
-            num_inner_samples=self.num_inner_samples,
-            log_file=self.log_file if rank == 0 else None
-        )
-
-        estimated_conditional_mutual_information = sample_based_approximator.estimate_pair_mutual_infomation()
-
-        if rank == 0:
-            np.save("estimated_conditional_mutual_information.npy", estimated_conditional_mutual_information)
-
-        self.write_log_file("End Conditional mutual information extimation")
+        estimator.compute_individual_parameter_data_mutual_information_via_mc(use_quadrature=True)
+        estimator.compute_posterior_pair_parameter_mutual_information(use_quadrature=True)
 
     def update_prior(self, theta_mle):
         """Function updates the prior"""
@@ -199,9 +176,9 @@ def main():
     gamma_true = 1
     delta_true = 5
     # loaded_ytrain = None
-    # theta_mle = None 
+    # theta_mle = None
     loaded_ytrain = np.load('ytrain.npy')
-    theta_mle = np.load('theta_mle.npy') 
+    theta_mle = np.load('theta_mle.npy')
 
     true_theta = np.array([alpha_true, gamma_true, delta_true])
 
@@ -212,7 +189,7 @@ def main():
     xtrain = np.array([50])
     model_noise_cov_scalar = 1e-1
     objective_scaling = 1e-10
-    num_outer_samples = 40
+    num_outer_samples = 50
     num_inner_samples = 20
 
     model = inference(
@@ -233,13 +210,11 @@ def main():
 
         if rank == 0:
             np.save("theta_mle.npy", theta_mle)
-
     # Update the prior
     model.update_prior(theta_mle)
 
     # Model identifiability
-    model.compute_estimated_mutual_information()
-    model.compute_estimated_conditional_mutual_information()
+    model.estimate_parameter_conditional_mutual_information()
 
     # if rank == 0:
     #     # Emmissivity
@@ -255,12 +230,13 @@ def main():
     #     axs[0].grid(axis="both")
     #     axs[0].set_xlabel("z")
     #     axs[0].set_ylabel("T(z)")
-    #     axs[1].plot(np.linspace(10, 100, 100), np.abs(true_emmisivity - prediction_emmisivity), color="k", lw=3)
-    #     axs[1].set_xlim(left=10, right=100)
+    #     axs[1].plot(np.linspace(20, 100, 200), np.abs(true_emmisivity - prediction_emmisivity), color="k", lw=3)
+    #     axs[1].set_xlim(left=20, right=100)
     #     axs[1].grid(axis="both")
     #     axs[1].set_yscale("log")
     #     axs[1].set_xlabel("T")
     #     axs[1].set_ylabel(r"$|\epsilon_{true}-\epsilon_{prediction}|$")
+    #     axs[1].xaxis.set_minor_locator(MultipleLocator(5))
     #     fig.suptitle(r"$T_{{\infty}} = {}$".format(50))
     #     plt.tight_layout()
     #     plt.savefig("prediction.png")
