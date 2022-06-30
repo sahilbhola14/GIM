@@ -41,7 +41,7 @@ class mutual_information():
             (self.num_outer_samples, )+self.ytrain.shape).T
 
     def sample_gaussian(self, mean, cov, num_samples):
-        """Function samples the gaussian"""
+       """Function samples the gaussian"""
         assert(mean.shape[1] >= 1), "incompatible mean shape"
         # Definitions
         d = mean.shape[0]
@@ -100,7 +100,7 @@ class mutual_information():
         return pre_exp*exp_term
 
     def sample_prior(self, num_samples):
-        """Function samples the prior distribution (currently only gaussian)"""
+      """Function samples the prior distribution (currently only gaussian)"""
         prior_samples = self.sample_gaussian(
             mean=self.prior_mean,
             cov=self.prior_cov,
@@ -270,7 +270,7 @@ class conditional_mutual_information(mutual_information):
             individual_mutual_information))
 
     def compute_pair_parameter_data_mutual_information_via_mc(self, compute_outer_samples=False, use_quadrature=False):
-        """Function computes the pair wise mutual information between the parameter and the data"""
+       """Function computes the pair wise mutual information between the parameter and the data"""
         if compute_outer_samples is True:
             # Prior samples
             self.outer_prior_samples = self.sample_prior(
