@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import sys
 from itertools import combinations
 import os
+import shutil
 sys.path.append("/home/sbhola/Documents/CASLAB/GIM/quadrature")
 from quadrature import unscented_quadrature, gauss_hermite_quadrature
 
@@ -24,6 +25,8 @@ class mutual_information():
             save_path,
             ytrain=None,
             log_file=None,
+            restart=False,
+            mutual_information_evidence_save_restart_freq=10,
     ):
         self.forward_model = forward_model
         self.prior_mean = prior_mean
@@ -34,6 +37,8 @@ class mutual_information():
         self.log_file = log_file
         self.ytrain = ytrain
         self.save_path = save_path
+        self.restart = restart
+        self.mutual_information_evidence_save_restart_freq = mutual_information_evidence_save_restart_freq
 
         self.num_parameters = self.prior_mean.shape[0]
 
@@ -56,6 +61,13 @@ class mutual_information():
 
         self.num_data_samples = self.ytrain.shape[0]
         self.spatial_res = self.ytrain.shape[1]
+
+        self.restart_file_path = os.path.join(self.save_path, "restart_files")
+
+        if self.restart is False:
+            if rank == 0:
+                self.create_restart_folders()
+        comm.Barrier()
 
     def compute_local_num_outer_samples(self):
         """Function computes the number of local number of samples"""
@@ -143,32 +155,70 @@ class mutual_information():
             np.exp(-0.5*np.sum(error_norm_sq / self.model_noise_cov_scalar, axis=0))
         return likelihood
 
-    def estimate_mutual_information_via_mc(self, use_quadrature=False):
+    def estimate_mutual_information_via_mc(self, use_quadrature=False, quadrature_rule="gaussian", num_gaussian_quad_pts=50):
         """Function computes the mutual information via mc"""
-        self.write_log_file(">>>-----------------------------------------------------------<<<")
-        self.write_log_file(">>> Begin computing the mutual information, I(theta;Y) <<<")
-        self.write_log_file(">>>-----------------------------------------------------------<<<\n")
+        self.write_log_file(
+            ">>>-----------------------------------------------------------<<<")
+        self.write_log_file(
+            ">>> Begin computing the mutual information, I(theta;Y) <<<")
+        self.write_log_file(
+            ">>>-----------------------------------------------------------<<<\n")
 
-        if self.outer_data_computation_req_flag is True:
-            # Generate the prior samples ~ p(\theta)
-            self.local_outer_prior_samples = self.sample_prior_distribution(
-                num_samples=self.local_num_outer_samples)
-            # Generate data samples from the conditional distribution, p(y | \theta)
-            self.local_outer_data_samples, self.local_outer_model_prediction = self.sample_likelihood(
-                theta=self.local_outer_prior_samples)
-            # Likelihood probability
-            self.local_outer_likelihood_prob = self.evaluate_likelihood_probaility(
-                data=self.local_outer_data_samples,
-                model_prediction=self.local_outer_model_prediction
+        if self.restart is False:
+            if self.outer_data_computation_req_flag is True:
+                # Generate the prior samples ~ p(\theta)
+                self.local_outer_prior_samples = self.sample_prior_distribution(
+                    num_samples=self.local_num_outer_samples)
+                # Generate data samples from the conditional distribution, p(y | \theta)
+                self.local_outer_data_samples, self.local_outer_model_prediction = self.sample_likelihood(
+                    theta=self.local_outer_prior_samples)
+                # Likelihood probability
+                self.local_outer_likelihood_prob = self.evaluate_likelihood_probaility(
+                    data=self.local_outer_data_samples,
+                    model_prediction=self.local_outer_model_prediction
+                )
+
+                self.save_restart_data(
+                    data=self.local_outer_prior_samples,
+                    data_type="outer",
+                    label="outer_prior_samples"
+                )
+                self.save_restart_data(
+                    data=self.local_outer_data_samples,
+                    data_type="outer",
+                    label="outer_data_samples"
+                )
+
+                self.save_restart_data(
+                    data=self.local_outer_likelihood_prob,
+                    data_type="outer",
+                    label="outer_likelihood_prob"
+                )
+
+                self.outer_data_computation_req_flag = False
+        else:
+            self.local_outer_prior_samples = self.load_restart_data(
+                data_type="outer",
+                label="outer_prior_samples"
             )
 
-            self.outer_data_computation_req_flag = False
+            self.local_outer_data_samples = self.load_restart_data(
+                data_type="outer",
+                label="outer_data_samples"
+            )
+
+            self.local_outer_likelihood_prob = self.load_restart_data(
+                data_type="outer",
+                label="outer_likelihood_prob"
+            )
 
         local_log_likelihood = np.log(self.local_outer_likelihood_prob)
 
         # Compute evidence
         local_evidence_prob = self.estimate_evidence_probability(
             use_quadrature=use_quadrature,
+            quadrature_rule=quadrature_rule,
+            num_gaussian_quad_pts=num_gaussian_quad_pts
         )
         local_log_evidence = np.log(local_evidence_prob)
 
@@ -181,35 +231,56 @@ class mutual_information():
                             global_log_evidence[ii]) for ii in range(size)])
             mutual_information = (1/self.global_num_outer_samples)*summation
 
-        self.save_quantity("estimated_mutual_information.npy", mutual_information)
-        self.write_log_file(">>> End computing the mutual information, I(theta;Y) <<<")
+        self.save_quantity(
+            "estimated_mutual_information.npy", mutual_information)
+        self.write_log_file(
+            ">>> End computing the mutual information, I(theta;Y) <<<")
 
-    def estimate_evidence_probability(self, use_quadrature=False, quadrature_rule="gaussian"):
+    def estimate_evidence_probability(self, use_quadrature=False, quadrature_rule="gaussian", num_gaussian_quad_pts):
         """Function estimates the evidence probability"""
         if use_quadrature is True:
             evidence_prob = self.integrate_likelihood_via_quadrature(
-                quadrature_rule=quadrature_rule)
+                quadrature_rule=quadrature_rule,
+                num_gaussian_quad_pts=num_gaussian_quad_pts)
         else:
-            evidence_prob = self.integrate_likelihood_via_mc()
+            evidence_prob = self.integrate_likelihood_via_mc(testid=testid)
 
         return evidence_prob
 
-    def integrate_likelihood_via_mc(self):
+    def integrate_likelihood_via_mc(self, testid):
         """Function integrates the likelihood to estimate the evidence"""
         # Definitions
-        evidence_prob = np.zeros(self.local_num_outer_samples)
+        if self.restart is False:
+            evidence_prob = np.nan*np.ones(self.local_num_outer_samples)
+            local_mutual_information_inner_counter = 0
+            local_lower_loop_idx = 0
+        else:
+            local_mutual_information_inner_counter = self.load_restart_data(
+                data_type="inner",
+                label="mutual_infomation_inner_counter",
+                sub_type="MI"
+            )
+            evidence_prob = self.load_restart_data(
+                data_type="inner",
+                label="evidence_prob",
+                sub_type="MI"
+            )
+            local_lower_loop_idx = local_mutual_information_inner_counter.item()
 
         # Pre computations
         pre_exp = 1 / ((2*np.pi*self.model_noise_cov_scalar)
                        ** (self.spatial_res/2))
+
         # Compute inner prior samples
         inner_prior_samples = self.sample_prior_distribution(
             num_samples=self.local_num_inner_samples)
+
         # Compute model prediction
         inner_model_prediction = self.compute_model_prediction(
             theta=inner_prior_samples)
+
         # Comptute the evidence
-        for isample in range(self.local_num_outer_samples):
+        for isample in range(local_lower_loop_idx, self.local_num_outer_samples):
             outer_sample = np.expand_dims(
                 self.local_outer_data_samples[:, :, isample], axis=-1)
             error = outer_sample - inner_model_prediction
@@ -220,14 +291,49 @@ class mutual_information():
             evidence_prob[isample] = (
                 1/self.local_num_inner_samples)*np.sum(sample_evidence_estimates)
 
+            local_mutual_information_inner_counter += 1
+
+            save_condition = isample % self.mutual_information_evidence_save_restart_freq
+            final_save_condition = self.local_num_outer_samples%self.mutual_information_evidence_save_restart_freq
+
+            if save_condition or final_save_condition == 0:
+                self.save_restart_data(
+                    data=local_mutual_information_inner_counter,
+                    data_type="inner",
+                    label="mutual_infomation_inner_counter",
+                    sub_type="MI"
+                )
+
+                self.save_restart_data(
+                    data=evidence_prob,
+                    data_type="inner",
+                    label="evidence_prob",
+                    sub_type="MI"
+                )
+
         return evidence_prob
 
-    def integrate_likelihood_via_quadrature(self, quadrature_rule):
+    def integrate_likelihood_via_quadrature(self, quadrature_rule, num_gaussian_quad_pts):
         """Function integrates the likelihood to estimate the evidence using quadratures"""
         # Definitions
-        evidence_prob = np.zeros(self.local_num_outer_samples)
+        if self.restart is False:
+            evidence_prob = np.nan*np.ones(self.local_num_outer_samples)
+            local_mutual_information_inner_counter = 0
+            local_lower_loop_idx = 0
+        else:
+            local_mutual_information_inner_counter = self.load_restart_data(
+                data_type="inner",
+                label="mutual_infomation_inner_counter",
+                sub_type="MI"
+            )
+            evidence_prob = self.load_restart_data(
+                data_type="inner",
+                label="evidence_prob",
+                sub_type="MI"
+            )
+            local_lower_loop_idx = local_mutual_information_inner_counter.item()
 
-        for isample in range(self.local_num_outer_samples):
+        for isample in range(local_lower_loop_idx, self.local_num_outer_samples):
             # Extract outer sample
             outer_sample = np.expand_dims(
                 self.local_outer_data_samples[:, :, isample], axis=-1)
@@ -257,12 +363,32 @@ class mutual_information():
                     mean=self.prior_mean,
                     cov=self.prior_cov,
                     integrand=integrand,
-                    num_points=60
+                    num_points=num_gaussian_quad_pts
                 )
                 evidence_prob[isample] = gh.compute_integeral()
 
             else:
                 raise ValueError("Invalid quadrature rule")
+
+            local_mutual_information_inner_counter += 1
+
+            save_condition = isample % self.mutual_information_evidence_save_restart_freq
+            final_save_condition = self.local_num_outer_samples%self.mutual_information_evidence_save_restart_freq
+
+            if save_condition or final_save_condition == 0:
+                self.save_restart_data(
+                    data=local_mutual_information_inner_counter,
+                    data_type="inner",
+                    label="mutual_infomation_inner_counter",
+                    sub_type="MI"
+                )
+
+                self.save_restart_data(
+                    data=evidence_prob,
+                    data_type="inner",
+                    label="evidence_prob",
+                    sub_type="MI"
+                )
 
         return evidence_prob
 
@@ -304,6 +430,64 @@ class mutual_information():
             self.log_file.write(message+"\n")
             self.log_file.flush()
 
+    def save_restart_data(self, data, data_type, label, sub_type=None):
+        """Function saves the data"""
+        if data_type == "outer":
+            folder = "outer_data"
+            file_path = os.path.join(
+                self.restart_file_path, folder, label+"_rank_{}.npy".format(rank))
+        else:
+            folder = "inner_data"
+
+            if sub_type == "MI":
+                sub_folder = "mutual_information"
+            elif sub_type == "ICMI":
+                sub_folder = "individual_conditional_mutual_information"
+            elif sub_type == "PCMI":
+                sub_folder = "pair_conditional_mutual_information"
+            else:
+                raise ValueError("Invalid subfolder type")
+
+            file_path = os.path.join(
+                self.restart_file_path, folder, sub_folder, label+"_rank_{}.npy".format(rank))
+
+        np.save(file_path, data)
+
+    def load_restart_data(self, data_type, label, sub_type=None):
+        """Function loads the data"""
+        if data_type == "outer":
+            folder = "outer_data"
+            file_path = os.path.join(
+                self.restart_file_path, folder, label+"_rank_{}.npy".format(rank))
+        else:
+            folder = "inner_data"
+
+            if sub_type == "MI":
+                sub_folder = "mutual_information"
+            elif sub_type == "ICMI":
+                sub_folder = "individual_conditional_mutual_information"
+            elif sub_type == "PCMI":
+                sub_folder = "pair_conditional_mutual_information"
+
+            file_path = os.path.join(
+                self.restart_file_path, folder, sub_folder, label+"_rank_{}.npy".format(rank))
+
+        return np.load(file_path)
+
+    def create_restart_folders(self):
+        """Function creates the restart folder """
+        if os.path.exists(self.restart_file_path):
+            shutil.rmtree(self.restart_file_path)
+        os.mkdir(self.restart_file_path)
+        os.mkdir(os.path.join(self.restart_file_path, "outer_data"))
+        os.mkdir(os.path.join(self.restart_file_path, "inner_data"))
+        os.mkdir(os.path.join(self.restart_file_path,
+                 "inner_data", "mutual_information"))
+        os.mkdir(os.path.join(self.restart_file_path, "inner_data",
+                 "individual_conditional_mutual_information"))
+        os.mkdir(os.path.join(self.restart_file_path, "inner_data",
+                 "pair_conditional_mutual_information"))
+
 
 class conditional_mutual_information(mutual_information):
     def compute_individual_parameter_data_mutual_information_via_mc(self, use_quadrature=False):
@@ -311,9 +495,12 @@ class conditional_mutual_information(mutual_information):
         # Definitions
         inidividual_mutual_information = np.zeros(self.num_parameters)
 
-        self.write_log_file(">>>-----------------------------------------------------------<<<")
-        self.write_log_file(">>> Begin computing the individual parameter mutual information, I(theta_i;Y|theta_[rest of parameters])")
-        self.write_log_file(">>>-----------------------------------------------------------<<<\n")
+        self.write_log_file(
+            ">>>-----------------------------------------------------------<<<")
+        self.write_log_file(
+            ">>> Begin computing the individual parameter mutual information, I(theta_i;Y|theta_[rest of parameters])")
+        self.write_log_file(
+            ">>>-----------------------------------------------------------<<<\n")
 
         if self.outer_data_computation_req_flag is True:
             self.write_log_file("Computing outer data samples")
@@ -337,7 +524,8 @@ class conditional_mutual_information(mutual_information):
 
         # Estimate p(y|theta_{-i})
         for iparameter in range(self.num_parameters):
-            self.write_log_file("Computing I(theta_{};Y| theta_[rest of parameters])".format(iparameter))
+            self.write_log_file(
+                "Computing I(theta_{};Y| theta_[rest of parameters])".format(iparameter))
             parameter_pair = np.array([iparameter])
             local_individual_likelihood = self.estimate_individual_likelihood(
                 parameter_pair=parameter_pair,
@@ -360,8 +548,10 @@ class conditional_mutual_information(mutual_information):
                     1/self.global_num_outer_samples)*summation
             self.write_log_file("----------------")
 
-        self.save_quantity("estimated_individual_mutual_information.npy", inidividual_mutual_information)
-        self.write_log_file(">>> End computing the individual parameter mutual information, I(theta_i;Y)")
+        self.save_quantity(
+            "estimated_individual_mutual_information.npy", inidividual_mutual_information)
+        self.write_log_file(
+            ">>> End computing the individual parameter mutual information, I(theta_i;Y)")
 
     def compute_posterior_pair_parameter_mutual_information(self, use_quadrature=False):
         """Function computes the posterior mutual information between parameters, I(theta_i;theta_j|Y, theta_k)"""
@@ -369,9 +559,12 @@ class conditional_mutual_information(mutual_information):
         parameter_combinations = np.array(
             list(combinations(np.arange(self.num_parameters), 2)))
         pair_mutual_information = np.zeros(parameter_combinations.shape[0])
-        self.write_log_file(">>>-----------------------------------------------------------<<<")
-        self.write_log_file(">>> Begin computing the pair parameter mutual information, I(theta_i;theta_j|Y, theta_[rest of parameters])")
-        self.write_log_file(">>>-----------------------------------------------------------<<<\n")
+        self.write_log_file(
+            ">>>-----------------------------------------------------------<<<")
+        self.write_log_file(
+            ">>> Begin computing the pair parameter mutual information, I(theta_i;theta_j|Y, theta_[rest of parameters])")
+        self.write_log_file(
+            ">>>-----------------------------------------------------------<<<\n")
 
         if self.outer_data_computation_req_flag is True:
             self.write_log_file("Computing outer data samples")
@@ -394,28 +587,33 @@ class conditional_mutual_information(mutual_information):
         local_log_likelihood = np.log(self.local_outer_likelihood_prob)
 
         for jj, parameter_pair in enumerate(parameter_combinations):
-            self.write_log_file(">>> Begin Pair {}/{} computations \n".format(jj+1, parameter_combinations.shape[0]))
+            self.write_log_file(
+                ">>> Begin Pair {}/{} computations \n".format(jj+1, parameter_combinations.shape[0]))
             local_individual_likelihood = []
             for iparameter in parameter_pair:
-                self.write_log_file("Computing individual likelihood (sampling theta_{}), p(y|theta_{}, theta_[rest of parameters])".format(iparameter, parameter_pair[parameter_pair != iparameter]))
+                self.write_log_file("Computing individual likelihood (sampling theta_{}), p(y|theta_{}, theta_[rest of parameters])".format(
+                    iparameter, parameter_pair[parameter_pair != iparameter]))
                 local_individual_likelihood.append(self.estimate_individual_likelihood(
                     parameter_pair=np.array([iparameter]),
                     use_quadrature=use_quadrature
                 ))
-                self.write_log_file("End computing individual likelihood (sampling theta_{}), p(y|theta_{}, theta_[rest of parameters])".format(iparameter, parameter_pair[parameter_pair != iparameter]))
+                self.write_log_file("End computing individual likelihood (sampling theta_{}), p(y|theta_{}, theta_[rest of parameters])".format(
+                    iparameter, parameter_pair[parameter_pair != iparameter]))
                 self.write_log_file("----------------")
 
             local_log_individual_likelihood = np.log(
                 np.array(local_individual_likelihood))
 
-            self.write_log_file("Computing pair likelihood (sampling theta_{} and theta_{}), p(y|theta_[rest of parameters])".format(parameter_pair[0], parameter_pair[1]))
+            self.write_log_file("Computing pair likelihood (sampling theta_{} and theta_{}), p(y|theta_[rest of parameters])".format(
+                parameter_pair[0], parameter_pair[1]))
             local_pair_likelihood = self.estimate_individual_likelihood(
                 parameter_pair=parameter_pair,
                 use_quadrature=use_quadrature
             )
             self.write_log_file("----------------")
             local_log_pair_likelihood = np.log(local_pair_likelihood)
-            self.write_log_file("End computing pair likelihood (sampling theta_{} and theta_{}), p(y|theta_[rest of parameters])\n".format(parameter_pair[0], parameter_pair[1]))
+            self.write_log_file("End computing pair likelihood (sampling theta_{} and theta_{}), p(y|theta_[rest of parameters])\n".format(
+                parameter_pair[0], parameter_pair[1]))
 
             comm.Barrier()
             global_log_likelihood = comm.gather(local_log_likelihood, root=0)
@@ -426,13 +624,16 @@ class conditional_mutual_information(mutual_information):
 
             if rank == 0:
                 summation = sum([np.sum(global_log_likelihood[ii]
-                                    + global_log_pair_likelihood[ii] 
-                                    - np.sum(global_log_individual_likelihood[ii], axis=0))
-                                    for ii in range(size)])
-                pair_mutual_information[jj] = (1/self.global_num_outer_samples)*summation
-            self.write_log_file(">>> End Pair {}/{} computations\n".format(jj+1, parameter_combinations.shape[0]))
+                                        + global_log_pair_likelihood[ii]
+                                        - np.sum(global_log_individual_likelihood[ii], axis=0))
+                                 for ii in range(size)])
+                pair_mutual_information[jj] = (
+                    1/self.global_num_outer_samples)*summation
+            self.write_log_file(
+                ">>> End Pair {}/{} computations\n".format(jj+1, parameter_combinations.shape[0]))
         # self.display_messsage("pair mutual information : {}".format(pair_mutual_information))
-        self.save_quantity("estimated_pair_mutual_information.npy", pair_mutual_information)
+        self.save_quantity(
+            "estimated_pair_mutual_information.npy", pair_mutual_information)
 
     def estimate_pair_likelihood(self, parameter_pair, use_quadrature, quadrature_rule="gaussian"):
         """Function commputes the pair likelihood defined as p(y|theta_{k})"""
