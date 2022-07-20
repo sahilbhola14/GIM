@@ -4,7 +4,7 @@ import sys
 from itertools import combinations
 import os
 import shutil
-sys.path.append("/home/sbhola/Documents/CASLAB/GIM/quadrature")
+sys.path.append("/home/sbhola/GIM/quadrature")
 from quadrature import unscented_quadrature, gauss_hermite_quadrature
 
 comm = MPI.COMM_WORLD
@@ -511,7 +511,7 @@ class mutual_information():
 
 
 class conditional_mutual_information(mutual_information):
-    def compute_individual_parameter_data_mutual_information_via_mc(self, use_quadrature=False, num_gaussian_quad_pts=50):
+    def compute_individual_parameter_data_mutual_information_via_mc(self, use_quadrature=False, single_integral_gaussian_quad_pts=60):
         """Function computes the mutual information between each parameter theta_i and data Y given rest of the parameters"""
         # Definitions
         if os.path.exists("estimated_individual_mutual_information.npy"):
@@ -611,7 +611,7 @@ class conditional_mutual_information(mutual_information):
             local_individual_likelihood = self.estimate_individual_likelihood(
                 parameter_pair=parameter_pair,
                 use_quadrature=use_quadrature,
-                num_gaussian_quad_pts=num_gaussian_quad_pts,
+                num_gaussian_quad_pts=single_integral_gaussian_quad_pts,
                 case_type="individual"
             )
 
@@ -646,7 +646,7 @@ class conditional_mutual_information(mutual_information):
         self.write_log_file(
             ">>> End computing the individual parameter mutual information, I(theta_i;Y)")
 
-    def compute_posterior_pair_parameter_mutual_information(self, use_quadrature=False, num_gaussian_quad_pts=50):
+    def compute_posterior_pair_parameter_mutual_information(self, use_quadrature=False, single_integral_gaussian_quad_pts=60, double_integral_gaussian_quad_pts=30):
         """Function computes the posterior mutual information between parameters, I(theta_i;theta_j|Y, theta_k)"""
         # Definitions
         parameter_combinations = np.array(
@@ -776,7 +776,7 @@ class conditional_mutual_information(mutual_information):
                 local_individual_likelihood[index, :] = self.estimate_individual_likelihood(
                         parameter_pair=np.array([iparameter]),
                         use_quadrature=use_quadrature,
-                        num_gaussian_quad_pts=num_gaussian_quad_pts,
+                        num_gaussian_quad_pts=single_integral_gaussian_quad_pts,
                         case_type="pair",
                         parent_pair=parameter_pair
                         )
@@ -810,7 +810,7 @@ class conditional_mutual_information(mutual_information):
             local_pair_likelihood = self.estimate_individual_likelihood(
                 parameter_pair=parameter_pair,
                 use_quadrature=use_quadrature,
-                num_gaussian_quad_pts=num_gaussian_quad_pts,
+                num_gaussian_quad_pts=double_integral_gaussian_quad_pts,
                 case_type="pair",
                 parent_pair=parameter_pair
             )
