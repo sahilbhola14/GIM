@@ -2,12 +2,13 @@
 import numpy as np
 from mpi4py import MPI
 import sys
+import os
 import matplotlib.pyplot as plt
 from mpi4py import MPI
 from scipy.optimize import minimize
 from itertools import combinations
 sys.path.append("/home/sbhola/Documents/CASLAB/GIM/information_metrics")
-from compute_identifiability import *
+from compute_identifiability_parallel_version import mutual_information, conditional_mutual_information
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
@@ -15,23 +16,30 @@ size = comm.Get_size()
 
 
 class linear_gaussian():
-    def __init__(self, xtrain, model_noise_cov_scalar, true_theta, prior_mean, prior_cov, num_data_samples):
+    def __init__(self, xtrain, model_noise_cov_scalar, true_theta, prior_mean, prior_cov, global_num_outer_samples, global_num_inner_samples):
         self.xtrain = xtrain
         self.spatial_res = self.xtrain.shape[0]
         self.model_noise_cov_scalar = model_noise_cov_scalar
         self.model_noise_cov_mat = self.model_noise_cov_scalar * \
             np.eye(self.spatial_res)
-        self.num_parameters = true_theta.shape[0]
+        self.true_theta = true_theta
+        self.num_parameters = self.true_theta.shape[0]
         self.prior_mean = prior_mean
         self.prior_cov = prior_cov
-        self.num_data_samples = num_data_samples
+        self.global_num_outer_samples = global_num_outer_samples
+        self.global_num_inner_samples = global_num_inner_samples
+
         self.vm = self.compute_vander_monde_matrix()
-        self.ytrain = np.tile(self.compute_model_prediction(
-            true_theta), (1, self.num_data_samples))
+        self.ytrain = self.compute_model_prediction(theta=self.true_theta)
         noise = np.sqrt(model_noise_cov_scalar) * \
             np.random.randn(
-                self.spatial_res*self.num_data_samples).reshape(self.spatial_res, self.num_data_samples)
+                self.spatial_res).reshape(1, self.spatial_res)
         self.ytrain += noise
+
+        if rank == 0:
+            self.log_file = open("log_file.dat", "w")
+        else:
+            self.log_file = None
 
     def compute_vander_monde_matrix(self):
         """Function computes the vander mode matrix"""
@@ -42,7 +50,7 @@ class linear_gaussian():
     def compute_model_prediction(self, theta):
         """Function computes the model prediction"""
         prediction = self.vm@theta[:, None]
-        return prediction.reshape(-1, 1)
+        return prediction.reshape(1, -1)
 
     def compute_log_likelihood(self, theta):
         """Function computes the log likelihood"""
@@ -105,7 +113,7 @@ class linear_gaussian():
         joint_cov = np.zeros((d, d))
 
         joint_mean[:self.num_parameters, :] = self.prior_mean
-        joint_mean[self.num_parameters:, :] = evidence_mean
+        joint_mean[self.num_parameters:, :] = evidence_mean.T
 
         joint_cov[:self.num_parameters, :self.num_parameters] = self.prior_cov
         joint_cov[:self.num_parameters, self.num_parameters:] = correlation
@@ -183,7 +191,7 @@ class linear_gaussian():
         joint_mean = np.zeros((dim, 1))
         joint_cov = np.zeros((dim, dim))
         joint_mean[:num_parameters, :] = parameter_mean
-        joint_mean[num_parameters:, :] = evidence_mean
+        joint_mean[num_parameters:, :] = evidence_mean.T
         joint_cov[:num_parameters, :num_parameters] = parameter_cov
         joint_cov[:num_parameters, num_parameters:] = correlation
         joint_cov[num_parameters:, :num_parameters] = correlation.T
@@ -201,23 +209,50 @@ class linear_gaussian():
         elif rank == print_rank:
             print(message+" at rank : {}".format(rank))
 
-    def validation(self):
-        test = conditional_mutual_information(
-            forward_model=self.compute_model_prediction,
-            prior_mean=self.prior_mean,
-            prior_cov=self.prior_cov,
-            model_noise_cov_scalar=self.model_noise_cov_scalar,
-            num_outer_samples=1000,
-            num_inner_samples=1000,
-            ytrain=self.ytrain
-        )
-        # test.compute_mutual_information_via_mc(use_quadrature=True)
-        # test.compute_individual_parameter_data_mutual_information_via_mc(
-        #     compute_outer_samples=True,
-        #     use_quadrature=True)
-        test.compute_pair_parameter_data_mutual_information_via_mc(
-                compute_outer_samples=True,
-                use_quadrature=False
+    def estimate_mutual_information(self):
+        """Function estimates the mutual information"""
+        estimator = mutual_information(
+                forward_model=self.compute_model_prediction,
+                prior_mean=self.prior_mean,
+                prior_cov=self.prior_cov,
+                model_noise_cov_scalar=self.model_noise_cov_scalar,
+                global_num_outer_samples=self.global_num_outer_samples,
+                global_num_inner_samples=self.global_num_inner_samples,
+                save_path=os.getcwd(),
+                restart=False,
+                log_file=self.log_file,
+                ytrain=self.ytrain
+                )
+
+        estimator.estimate_mutual_information_via_mc(
+                use_quadrature=True
+                )
+
+    def estimate_conditional_mutual_information(self):
+        """Function estimates the conditional_mutual_information"""
+
+        estimator = conditional_mutual_information(
+                forward_model=self.compute_model_prediction,
+                prior_mean=self.prior_mean,
+                prior_cov=self.prior_cov,
+                model_noise_cov_scalar=self.model_noise_cov_scalar,
+                global_num_outer_samples=self.global_num_outer_samples,
+                global_num_inner_samples=self.global_num_inner_samples,
+                save_path=os.getcwd(),
+                restart=False,
+                log_file=self.log_file,
+                ytrain=self.ytrain
+                )
+
+        estimator.compute_individual_parameter_data_mutual_information_via_mc(
+                use_quadrature=True,
+                single_integral_gaussian_quad_pts=50
+                )
+
+        estimator.compute_posterior_pair_parameter_mutual_information(
+                use_quadrature=True,
+                single_integral_gaussian_quad_pts=50,
+                double_integral_gaussian_quad_pts=50
                 )
 
     def compute_true_evidence_entropy(self):
@@ -328,9 +363,10 @@ def main():
     xtrain = np.linspace(-1, 1, num_samples)
     model_noise_cov_scalar = 1e-1
     true_theta = np.arange(1, 4)
-    prior_mean = np.arange(1, 4).reshape(-1, 1)
-    prior_cov = np.eye(3)
-    num_data_samples = 1
+    prior_mean = true_theta.copy().reshape(-1, 1)
+    prior_cov = np.eye(true_theta.shape[0])
+    global_num_outer_samples = 10000
+    global_num_inner_samples = 10
 
     model = linear_gaussian(
         xtrain=xtrain,
@@ -338,13 +374,21 @@ def main():
         true_theta=true_theta,
         prior_mean=prior_mean,
         prior_cov=prior_cov,
-        num_data_samples=num_data_samples
+        global_num_outer_samples=global_num_outer_samples,
+        global_num_inner_samples=global_num_inner_samples
     )
+
+    # Theoretical estimates
     # model.compute_true_mutual_information()
-    # model.compute_true_individual_parameter_data_mutual_information()
+    model.compute_true_individual_parameter_data_mutual_information()
     model.compute_true_pair_parameter_data_mutual_information()
-    # model.compute_true_evidence_entropy()
-    model.validation()
+
+    # Estimates
+    # model.estimate_mutual_information()
+    model.estimate_conditional_mutual_information()
+
+    if rank == 0:
+        model.log_file.close()
 
 
 if __name__ == "__main__":
