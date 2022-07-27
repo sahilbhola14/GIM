@@ -26,7 +26,7 @@ size = comm.Get_size()
 
 
 class inference():
-    def __init__(self, xtrain, model_noise_cov_scalar, true_theta, objective_scaling, prior_mean, prior_cov, num_outer_samples, num_inner_samples, loaded_ytrain=None):
+    def __init__(self, xtrain, model_noise_cov_scalar, true_theta, objective_scaling, prior_mean, prior_cov, num_outer_samples, num_inner_samples, loaded_ytrain=None, restart=False):
         self.xtrain = xtrain
         self.model_noise_cov_scalar = model_noise_cov_scalar
         self.num_data_samples = self.xtrain.shape[0]
@@ -37,6 +37,7 @@ class inference():
         self.objective_scaling = objective_scaling
         self.num_outer_samples = num_outer_samples
         self.num_inner_samples = num_inner_samples
+        self.restart = restart
 
         if loaded_ytrain is None:
             self.ytrain = self.compute_model_prediction(theta=self.true_theta)
@@ -50,7 +51,7 @@ class inference():
 
         else:
             self.ytrain = loaded_ytrain
-            self.spatial_res = self.ytrain.shape[0]
+            self.spatial_res = self.ytrain.shape[1]
 
         self.model_noise_cov_mat = self.model_noise_cov_scalar * \
             np.eye(self.spatial_res)
@@ -127,11 +128,11 @@ class inference():
         """Function extracts the parameters"""
         alpha = theta[0]
         gamma = theta[1]
-        delta = theta[2]
+        # delta = theta[2]
 
         # alpha = 3*np.pi/200
         # gamma = 1
-        # delta = 5
+        delta = 5
 
         return alpha, gamma, delta
 
@@ -154,11 +155,20 @@ class inference():
                 global_num_inner_samples=self.num_inner_samples,
                 ytrain=self.ytrain,
                 save_path=os.getcwd(),
-                log_file=self.log_file
+                log_file=self.log_file,
+                restart=self.restart
                 )
+        breakpoint()
 
-        estimator.compute_individual_parameter_data_mutual_information_via_mc(use_quadrature=True)
-        estimator.compute_posterior_pair_parameter_mutual_information(use_quadrature=True)
+        estimator.compute_individual_parameter_data_mutual_information_via_mc(
+                use_quadrature=True,
+                single_integral_gaussian_quad_pts=60
+                )
+        estimator.compute_posterior_pair_parameter_mutual_information(
+                use_quadrature=True,
+                single_integral_gaussian_quad_pts=60,
+                double_integral_gaussian_quad_pts=60
+                )
 
     def update_prior(self, theta_mle):
         """Function updates the prior"""
@@ -179,17 +189,19 @@ def main():
     # theta_mle = None
     loaded_ytrain = np.load('ytrain.npy')
     theta_mle = np.load('theta_mle.npy')
+    restart = False
 
-    true_theta = np.array([alpha_true, gamma_true, delta_true])
+    # true_theta = np.array([alpha_true, gamma_true, delta_true])
+    true_theta = np.array([alpha_true, gamma_true])
 
     # Initialize the prior
     prior_mean = true_theta.copy().reshape(-1, 1)
     prior_cov = np.eye(prior_mean.shape[0])
 
     xtrain = np.array([50])
-    model_noise_cov_scalar = 1e-1
+    model_noise_cov_scalar = 1e+1
     objective_scaling = 1e-10
-    num_outer_samples = 50
+    num_outer_samples = 500
     num_inner_samples = 20
 
     model = inference(
@@ -201,7 +213,8 @@ def main():
         prior_cov=prior_cov,
         num_outer_samples=num_outer_samples,
         num_inner_samples=num_inner_samples,
-        loaded_ytrain = loaded_ytrain
+        loaded_ytrain = loaded_ytrain,
+        restart=restart
     )
 
     # MLE
@@ -215,6 +228,7 @@ def main():
 
     # Model identifiability
     model.estimate_parameter_conditional_mutual_information()
+
 
     # if rank == 0:
     #     # Emmissivity
