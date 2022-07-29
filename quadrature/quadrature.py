@@ -49,7 +49,7 @@ class unscented_quadrature():
         Wic = 1 / (2*(dim + lam))
         return (W0m, Wim, W0c, Wic)
 
-    def compute_integeral(self):
+    def compute_integeral(self, importance_sampling_weights=None):
         """Function comptues the integral"""
         # Compute the quadrature points
         quadrature_points = self.compute_quadrature_points()
@@ -57,9 +57,14 @@ class unscented_quadrature():
         weights = self.compute_weights()
         # Compute integrand at the quadrature points
         model_prediction = self.integrand(quadrature_points)
+        # Compute integrand val
+        if importance_sampling_weights is None:
+            integrand = model_prediction.copy()
+        else:
+            integrand = model_prediction*importance_sampling_weights
 
-        integral_mean = weights[0]*model_prediction[:, 0]
-        integral_mean += np.sum(weights[1]*model_prediction[:, 1:], axis=1)
+        integral_mean = weights[0]*integrand[:, 0]
+        integral_mean += np.sum(weights[1]*integrand[:, 1:], axis=1)
 
         def compute_error(x): return (x-integral_mean).reshape(-1, 1)
 
@@ -67,9 +72,9 @@ class unscented_quadrature():
             error = compute_error(x)
             return error@error.T
 
-        integral_cov = weights[2]*compute_outer(model_prediction[:, 0])
-        for ii in range(1, model_prediction.shape[1]):
-            integral_cov += weights[-1]*compute_outer(model_prediction[:, ii])
+        integral_cov = weights[2]*compute_outer(integrand[:, 0])
+        for ii in range(1, integrand.shape[1]):
+            integral_cov += weights[-1]*compute_outer(integrand[:, ii])
 
         return integral_mean, integral_cov
 
@@ -134,14 +139,19 @@ class gauss_hermite_quadrature():
             rotated_points[:, ipoint] = self.mean.ravel() + np.dot(L, unrotated_points[:, ipoint])
         return rotated_points
 
-    def compute_integeral(self):
+    def compute_integeral(self, importance_sampling_weights=None):
         """Function comptues the intergral"""
         # Compute the quadrature points and weights
         quadrature_points, weights = self.compute_quadrature_points_and_weights()
         # Compute integrand at the quadrature points
         model_prediction = self.integrand(quadrature_points)
+        # Compute integrand val
+        if importance_sampling_weights is None:
+            integrand = model_prediction.copy()
+        else:
+            integrand = model_prediction*importance_sampling_weights
         # Compute the integral
-        integral = np.array([model_prediction[:, ii]*weights[ii] for ii in range(weights.shape[0])])
+        integral = np.array([integrand[:, ii]*weights[ii] for ii in range(weights.shape[0])])
         return np.sum(integral, axis=0)
 
 
@@ -195,6 +205,15 @@ def plot_points(num_samples, gaussian_mean, gaussian_cov, integrand_function, vi
     plt.show()
 
 
+def compute_gaussian_prob(mean, cov, samples):
+    """Function evaluates the proabability of the samples given the normal distribution"""
+    d = mean.shape[0]
+    error = mean-samples
+    exp_term = np.exp(-0.5*np.diag(error.T@np.linalg.solve(cov, error)))
+    pre_exp_term = 1/(((2*np.pi)**(d/2))*(np.linalg.det(cov)**(0.5)))
+    return pre_exp_term*exp_term
+
+
 def reference_cov():
     "test gaussian"
     std1 = 1
@@ -205,18 +224,76 @@ def reference_cov():
     return cov
 
 
+def importance_sampling_cov():
+    factor = 0.9
+    std1 = 1*factor
+    std2 = 2*factor
+    rho = 0.9
+    cov = np.array([[std1*std1, rho * std1 * std2],
+                   [rho * std1 * std2, std2*std2]])
+    return cov
+
+
+def compute_importance_sampling_weights(eval_points):
+    """Function comptues the importance sampling weights"""
+    def target_density_estimator(eval_points):
+        proabability = compute_gaussian_prob(
+                mean=np.zeros((2,1)),
+                cov=reference_cov(),
+                samples=eval_points
+                )
+        return proabability
+
+    def proposal_density_estimator(eval_points):
+        proabability = compute_gaussian_prob(
+                mean=np.zeros((2,1)),
+                cov=importance_sampling_cov(),
+                samples=eval_points
+                )
+        return proabability
+
+    target_denstiy = target_density_estimator(eval_points)
+    proposal_density = proposal_density_estimator(eval_points)
+
+    return target_denstiy/proposal_density
+
+
 def main():
     gaussian_mean = np.zeros((2, 1))
     gaussian_cov = reference_cov()
+    proposal_cov=importance_sampling_cov()
 
+    #""" Without importance sampling (Unscented quadrature)
     unscented_quad = unscented_quadrature(
             mean=gaussian_mean,
             cov=gaussian_cov,
             integrand=test_function,
             )
     mean, cov = unscented_quad.compute_integeral()
-    print(mean)
+    print("Without importance sampling (Unscented) : {}".format(mean))
+    #"""
 
+    #""" With Importance sampling (Unscented quadrature)
+    unscented_quad = unscented_quadrature(
+            mean=gaussian_mean,
+            cov=proposal_cov,
+            integrand=test_function,
+            )
+
+    quadrature_points = unscented_quad.compute_quadrature_points()
+    importance_sampling_weights = compute_importance_sampling_weights(
+            eval_points=quadrature_points
+            )
+    mean, cov = unscented_quad.compute_integeral(
+            importance_sampling_weights=importance_sampling_weights
+            )
+
+    print("With importance sampling (Unscented) : {}".format(mean))
+    #"""
+
+    print("---------------------------------")
+
+    #""" Without importance sampling (Gaussian)
     gh = gauss_hermite_quadrature(
             mean=gaussian_mean,
             cov=gaussian_cov,
@@ -224,10 +301,32 @@ def main():
             num_points=3
             )
     gh_int = gh.compute_integeral()
-    print(gh_int)
-    # gh_points, gh_weights = gh.compute_quadrature_points_and_weights()
+    print("Without importance sampling (Gaussian) : {}".format(gh_int))
+    #"""
 
-    # plot_points(1000, gaussian_mean=gaussian_mean, gaussian_cov=gaussian_cov, integrand_function=test_function, view_points=gh_points)
+    #""" With importance sampling (Gaussian)
+    gh = gauss_hermite_quadrature(
+            mean=gaussian_mean,
+            cov=gaussian_cov,
+            integrand=test_function,
+            num_points=3
+            )
+
+    quadrature_points, _  = gh.compute_quadrature_points_and_weights()
+
+    importance_sampling_weights = compute_importance_sampling_weights(
+            eval_points=quadrature_points
+            )
+
+    gh_int = gh.compute_integeral(
+            importance_sampling_weights=importance_sampling_weights
+            )
+    print("With importance sampling (Gaussian) : {}".format(gh_int))
+    #"""
+
+    # # gh_points, gh_weights = gh.compute_quadrature_points_and_weights()
+
+    # # plot_points(1000, gaussian_mean=gaussian_mean, gaussian_cov=gaussian_cov, integrand_function=test_function, view_points=gh_points)
 
 
 
