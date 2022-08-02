@@ -1,3 +1,7 @@
+# Author: Sahil Bhola (University of Michigan)
+# Date: 14 June 2022
+# Description : Computes the model identifiability using Mutual information
+
 import numpy as np
 from mpi4py import MPI
 import sys
