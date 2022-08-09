@@ -14,7 +14,7 @@ sys.path.append("../forward_model")
 sys.path.append("../../../information_metrics")
 
 from rht_true import compute_prediction
-from compute_identifiability_parallel_version import conditional_mutual_information
+from compute_identifiability_radiative_heat_transfer import conditional_mutual_information
 
 plt.rc('text', usetex=True)
 plt.rc('font', family='serif', size=20)

@@ -8,7 +8,7 @@ from mpi4py import MPI
 from scipy.optimize import minimize
 from itertools import combinations
 sys.path.append("/home/sbhola/Documents/CASLAB/GIM/information_metrics")
-from compute_identifiability_parallel_version import mutual_information, conditional_mutual_information
+from compute_identifiability import mutual_information, conditional_mutual_information
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
