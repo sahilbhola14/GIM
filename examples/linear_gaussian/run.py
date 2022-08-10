@@ -4,7 +4,6 @@ from mpi4py import MPI
 import sys
 import os
 import matplotlib.pyplot as plt
-from mpi4py import MPI
 from scipy.optimize import minimize
 from itertools import combinations
 sys.path.append("/home/sbhola/Documents/CASLAB/GIM/information_metrics")
@@ -16,7 +15,7 @@ size = comm.Get_size()
 
 
 class linear_gaussian():
-    def __init__(self, xtrain, model_noise_cov_scalar, true_theta, prior_mean, prior_cov, global_num_outer_samples, global_num_inner_samples):
+    def __init__(self, xtrain, model_noise_cov_scalar, true_theta, prior_mean, prior_cov, global_num_outer_samples, global_num_inner_samples, ytrain=None):
         self.xtrain = xtrain
         self.spatial_res = self.xtrain.shape[0]
         self.model_noise_cov_scalar = model_noise_cov_scalar
@@ -30,11 +29,16 @@ class linear_gaussian():
         self.global_num_inner_samples = global_num_inner_samples
 
         self.vm = self.compute_vander_monde_matrix()
-        self.ytrain = self.compute_model_prediction(theta=self.true_theta)
-        noise = np.sqrt(model_noise_cov_scalar) * \
-            np.random.randn(
-                self.spatial_res).reshape(1, self.spatial_res)
-        self.ytrain += noise
+        if ytrain is None:
+            self.ytrain = self.compute_model_prediction(theta=self.true_theta)
+            noise = np.sqrt(model_noise_cov_scalar) * \
+                np.random.randn(
+                    self.spatial_res).reshape(1, self.spatial_res)
+            self.ytrain += noise
+            if rank == 0:
+                np.save("ytrain.npy", self.ytrain)
+        else:
+            self.ytrain = ytrain
 
         if rank == 0:
             self.log_file = open("log_file.dat", "w")
@@ -59,16 +63,12 @@ class linear_gaussian():
         error_norm_sq = np.linalg.norm(error)**2
         return -0.5*error_norm_sq/self.model_noise_cov_scalar
 
-    def compute_mle(self):
-        """Function computes the mle estimate"""
-        def objective_function(theta):
-            return -self.compute_log_likelihood(theta)
-
-        res = minimize(objective_function, np.random.randn(
-            self.num_parameters), method="Nelder-Mead")
-        res = minimize(objective_function, res.x)
-
-        return res.x
+    def compute_log_prior(self, theta):
+        """Function computes the log prior (unnormalized)"""
+        error = (theta - self.prior_mean.ravel()).reshape(-1, 1)
+        exp_term_solve = error.T@np.linalg.solve(self.prior_cov, error)
+        exp_term = -0.5*exp_term_solve
+        return exp_term.item()
 
     def compute_gaussian_entropy(self, cov):
         """Function computes the entropy of a gaussian distribution"""
@@ -357,14 +357,72 @@ class linear_gaussian():
             print("I(theta_{};theta_{} | y, theta_[not selected]) : {}".format(iparameter[0], iparameter[1], conditional_mutual_information))
             print("------------")
 
+    def compute_unnormalized_log_posterior(self, theta):
+        """Function computes the unnormalized log posterior"""
+        unnormalized_log_likelihood = self.compute_log_likelihood(theta)
+        unnormalized_log_prior = self.compute_log_prior(theta)
+        unnormalized_log_posterior = unnormalized_log_likelihood + unnormalized_log_prior
+        return unnormalized_log_posterior
+
+    def compute_mle(self, objective_function_scaling):
+        """Function computes the mle estimate"""
+        def negative_log_likelihood(theta):
+            objective = -self.compute_log_likelihood(theta)
+            return objective*objective_function_scaling
+
+        res = minimize(negative_log_likelihood, np.random.randn(self.num_parameters), method="Nelder-Mead")
+        res = minimize(negative_log_likelihood, res.x)
+        if res.success is False:
+            print("Numerical minima not found")
+        return res.x
+
+    def compute_map_estimate(self, objective_function_scaling):
+        """Function esimates the map estimate"""
+        def unnormalized_log_posterior(theta):
+            objective = -self.compute_unnormalized_log_posterior(theta)
+            return objective*objective_function_scaling
+
+        res = minimize(unnormalized_log_posterior, np.random.randn(self.num_parameters), method="Nelder-Mead")
+        res = minimize(unnormalized_log_posterior, res.x)
+
+        if res.success is False:
+            print("Numerical minima not found")
+
+        theta_map = res.x
+        cov_approx = res.hess_inv
+        return theta_map, cov_approx
+
+    def update_prior(self, new_mean, new_cov):
+        """Function updates the prior mean and cov"""
+        self.prior_mean = new_mean.reshape(-1, 1)
+        self.prior_cov = new_cov
+
 
 def main():
     num_samples = 100
     xtrain = np.linspace(-1, 1, num_samples)
     model_noise_cov_scalar = 1e-1
+    objective_function_scaling = 1e-10
     true_theta = np.arange(1, 4)
-    prior_mean = true_theta.copy().reshape(-1, 1)
-    prior_cov = np.eye(true_theta.shape[0])
+
+    load_ytrain = True
+    load_parameter_estimate = True
+
+    compute_mle = False
+    compute_map = True
+
+    if load_ytrain is False:
+        ytrain = None
+    else:
+        ytrain = np.load("ytrain.npy")
+
+    if load_parameter_estimate is False:
+        prior_mean = np.ones(true_theta.shape[0]).reshape(-1, 1)
+        prior_cov = np.eye(true_theta.shape[0])
+    else:
+        prior_mean = np.load("theta_mean.npy")
+        prior_cov = np.load("theta_cov.npy")
+
     global_num_outer_samples = 10000
     global_num_inner_samples = 10
 
@@ -375,17 +433,45 @@ def main():
         prior_mean=prior_mean,
         prior_cov=prior_cov,
         global_num_outer_samples=global_num_outer_samples,
-        global_num_inner_samples=global_num_inner_samples
+        global_num_inner_samples=global_num_inner_samples,
+        ytrain=ytrain
     )
+
+    # Estimates
+    if load_parameter_estimate is False:
+        if compute_mle is True:
+            theta_mle = model.compute_mle(objective_function_scaling)
+
+            new_mean = theta_mle.copy()
+            new_cov = np.eye(theta_mle.shape[0])
+
+        elif compute_map is True:
+            theta_map, map_cov_approx = model.compute_map_estimate(objective_function_scaling)
+
+            new_mean = theta_map
+            new_cov = map_cov_approx
+        else:
+            raise ValueError("Estimator type must be provided")
+
+        model.update_prior(
+                new_mean=new_mean,
+                new_cov=new_cov
+                )
+
+        if rank == 0:
+            np.save("theta_mean.npy", model.prior_mean)
+            np.save("theta_cov.npy", model.prior_cov)
+
+    # print(model.prior_mean, model.prior_cov)
 
     # Theoretical estimates
     # model.compute_true_mutual_information()
     model.compute_true_individual_parameter_data_mutual_information()
-    model.compute_true_pair_parameter_data_mutual_information()
+    # model.compute_true_pair_parameter_data_mutual_information()
 
     # Estimates
     # model.estimate_mutual_information()
-    model.estimate_conditional_mutual_information()
+    # model.estimate_conditional_mutual_information()
 
     if rank == 0:
         model.log_file.close()
