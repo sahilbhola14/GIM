@@ -128,11 +128,11 @@ class inference():
         """Function extracts the parameters"""
         alpha = theta[0]
         gamma = theta[1]
-        # delta = theta[2]
+        delta = theta[2]
 
         # alpha = 3*np.pi/200
         # gamma = 1
-        delta = 5
+        # delta = 5
 
         return alpha, gamma, delta
 
@@ -191,15 +191,15 @@ def main():
     theta_mle = np.load('theta_mle.npy')
     restart = False
 
-    # true_theta = np.array([alpha_true, gamma_true, delta_true])
-    true_theta = np.array([alpha_true, gamma_true])
+    true_theta = np.array([alpha_true, gamma_true, delta_true])
+    # true_theta = np.array([alpha_true, gamma_true])
 
     # Initialize the prior
     prior_mean = true_theta.copy().reshape(-1, 1)
     prior_cov = np.eye(prior_mean.shape[0])
 
     xtrain = np.array([50])
-    model_noise_cov_scalar = 1e+1
+    model_noise_cov_scalar = 1e-1
     objective_scaling = 1e-10
     num_outer_samples = 500
     num_inner_samples = 20
@@ -213,7 +213,7 @@ def main():
         prior_cov=prior_cov,
         num_outer_samples=num_outer_samples,
         num_inner_samples=num_inner_samples,
-        loaded_ytrain = loaded_ytrain,
+        loaded_ytrain=loaded_ytrain,
         restart=restart
     )
 
@@ -227,7 +227,7 @@ def main():
     model.update_prior(theta_mle)
 
     # Model identifiability
-    model.estimate_parameter_conditional_mutual_information()
+    # model.estimate_parameter_conditional_mutual_information()
 
 
     # if rank == 0:

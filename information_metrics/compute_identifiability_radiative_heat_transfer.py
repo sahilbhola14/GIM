@@ -10,7 +10,7 @@ from itertools import combinations
 import os
 import shutil
 import matplotlib.pyplot as plt
-sys.path.append("/scratch/kdur_root/kdur/sbhola/GIM/quadrature")
+sys.path.append("/home/sbhola/Documents/CASLAB/GIM/quadrature")
 from quadrature import unscented_quadrature, gauss_hermite_quadrature
 
 comm = MPI.COMM_WORLD
@@ -152,9 +152,9 @@ class mutual_information():
         noise = np.sqrt(self.model_noise_cov_scalar) * \
             np.random.randn(product).reshape(model_prediction.shape)
         structured_noise = self.enforce_noise_structure(
-                model_prediction=model_prediction,
-                noise=noise
-                )
+            model_prediction=model_prediction,
+            noise=noise
+        )
         likelihood_sample = model_prediction + structured_noise
         return likelihood_sample, model_prediction
 
@@ -1018,7 +1018,7 @@ class conditional_mutual_information(mutual_information):
             )
 
             return probability
-        
+
         for isample in range(local_lower_loop_idx, self.local_num_outer_samples):
             # Extract outer sample
             outer_sample = np.expand_dims(
@@ -1050,26 +1050,27 @@ class conditional_mutual_information(mutual_information):
                     np.sqrt(individual_likelihood_cov)*np.random.randn(1)
 
                 if individual_likelihood_prob[isample] == 0:
-                   # Use importance sampling
-                     for _, ifactor in enumerate(importance_sampling_cov_factors):
+                    # Use importance sampling
+                    for _, ifactor in enumerate(importance_sampling_cov_factors):
 
-                        cov_multiplication_factor = ifactor*np.eye(sample_parameter_mean.shape[0])
-
+                        cov_multiplication_factor = ifactor * \
+                            np.eye(sample_parameter_mean.shape[0])
 
                         unscented_quad = unscented_quadrature(
-                            mean=self.get_sample_centered_mean(sample_parameter_extracted_sample=self.local_outer_prior_samples[sample_parameter_idx, isample]),
+                            mean=self.get_sample_centered_mean(
+                                sample_parameter_extracted_sample=self.local_outer_prior_samples[sample_parameter_idx, isample]),
                             cov=sample_parameter_cov*cov_multiplication_factor,
                             integrand=integrand
                         )
 
                         def proposal_density_estimator(eval_points):
-                                                        probability = self.compute_gaussian_prob(
-                                                            mean=self.get_sample_centered_mean(sample_parameter_extracted_sample=self.local_outer_prior_samples[sample_parameter_idx, isample]),
-                                                            cov=sample_parameter_cov*cov_multiplication_factor,
-                                                            samples=eval_points
-                                                        )
-                                                        return probability
-
+                            probability = self.compute_gaussian_prob(
+                                mean=self.get_sample_centered_mean(
+                                    sample_parameter_extracted_sample=self.local_outer_prior_samples[sample_parameter_idx, isample]),
+                                cov=sample_parameter_cov*cov_multiplication_factor,
+                                samples=eval_points
+                            )
+                            return probability
 
                         quadrature_points = unscented_quad.compute_quadrature_points()
 
@@ -1084,10 +1085,11 @@ class conditional_mutual_information(mutual_information):
                         )
 
                         individual_likelihood_prob[isample] = individual_likelihood_mean + \
-                            np.sqrt(individual_likelihood_cov)*np.random.randn(1)
+                            np.sqrt(individual_likelihood_cov) * \
+                            np.random.randn(1)
 
-                        if individual_likelihood_prob[isample] != 0: 
-                                                    break
+                        if individual_likelihood_prob[isample] != 0:
+                            break
 
             elif quadrature_rule == "gaussian":
 
@@ -1099,27 +1101,30 @@ class conditional_mutual_information(mutual_information):
                 )
 
                 individual_likelihood_prob[isample] = gh.compute_integeral()
-                
+
                 if individual_likelihood_prob[isample] == 0:
 
                     for _, ifactor in enumerate(importance_sampling_cov_factors):
 
-                        cov_multiplication_factor = ifactor*np.eye(sample_parameter_mean.shape[0])
+                        cov_multiplication_factor = ifactor * \
+                            np.eye(sample_parameter_mean.shape[0])
 
                         gh = gauss_hermite_quadrature(
-                            mean=self.get_sample_centered_mean(sample_parameter_extracted_sample=self.local_outer_prior_samples[sample_parameter_idx, isample]),
+                            mean=self.get_sample_centered_mean(
+                                sample_parameter_extracted_sample=self.local_outer_prior_samples[sample_parameter_idx, isample]),
                             cov=sample_parameter_cov*cov_multiplication_factor,
                             integrand=integrand,
                             num_points=num_gaussian_quad_pts
                         )
 
                         def proposal_density_estimator(eval_points):
-                                    probability = self.compute_gaussian_prob(
-                                        mean=self.get_sample_centered_mean(sample_parameter_extracted_sample=self.local_outer_prior_samples[sample_parameter_idx, isample]),
-                                        cov=sample_parameter_cov*cov_multiplication_factor,
-                                        samples=eval_points
-                                    )
-                                    return probability
+                            probability = self.compute_gaussian_prob(
+                                mean=self.get_sample_centered_mean(
+                                    sample_parameter_extracted_sample=self.local_outer_prior_samples[sample_parameter_idx, isample]),
+                                cov=sample_parameter_cov*cov_multiplication_factor,
+                                samples=eval_points
+                            )
+                            return probability
 
                         quadrature_points, _ = gh.compute_quadrature_points_and_weights()
 
@@ -1132,8 +1137,8 @@ class conditional_mutual_information(mutual_information):
                         individual_likelihood_prob[isample] = gh.compute_integeral(
                             importance_sampling_weights=importance_sampling_weights
                         )
-                        
-                        if individual_likelihood_prob[isample] != 0: 
+
+                        if individual_likelihood_prob[isample] != 0:
                             break
 
             else:
@@ -1185,7 +1190,6 @@ class conditional_mutual_information(mutual_information):
         sample_evidence_estimates = pre_exp * \
             np.exp(-0.5*np.sum(error_norm_sq /
                                self.model_noise_cov_scalar, axis=0))
-
 
         return sample_evidence_estimates.reshape(1, -1)
 
