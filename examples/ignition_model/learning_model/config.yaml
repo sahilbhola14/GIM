@@ -1,0 +1,8 @@
+temperature_inputs: [500, 600, 700, 800, 900]
+equivalence_ratio_inputs: [0.2]
+model_noise_cov: [0.01]
+true_theta: [27.38, 31944.0]
+objective_scaling: 1e-8
+load_theta_mle: True
+
+
