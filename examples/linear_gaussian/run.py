@@ -1,6 +1,7 @@
 # from sample_based_mutual_information import approx_mutual_information
 import numpy as np
 from mpi4py import MPI
+import yaml
 import sys
 import os
 import matplotlib.pyplot as plt
@@ -15,20 +16,29 @@ size = comm.Get_size()
 
 
 class linear_gaussian():
-    def __init__(self, xtrain, model_noise_cov_scalar, true_theta, prior_mean, prior_cov, global_num_outer_samples, global_num_inner_samples, ytrain=None):
+    def __init__(self, xtrain, model_noise_cov_scalar, true_theta, prior_mean, prior_cov, global_num_outer_samples, global_num_inner_samples, ytrain, sub_sample_idx):
         self.xtrain = xtrain
         self.spatial_res = self.xtrain.shape[0]
         self.model_noise_cov_scalar = model_noise_cov_scalar
         self.model_noise_cov_mat = self.model_noise_cov_scalar * \
             np.eye(self.spatial_res)
+
         self.true_theta = true_theta
         self.num_parameters = self.true_theta.shape[0]
+
         self.prior_mean = prior_mean
         self.prior_cov = prior_cov
+
         self.global_num_outer_samples = global_num_outer_samples
         self.global_num_inner_samples = global_num_inner_samples
 
+        self.sub_sample_idx = sub_sample_idx
+        self.sub_sample_matrix = np.zeros((self.sub_sample_idx.shape[0], self.spatial_res))
+        self.sub_sample_matrix[np.arange(self.sub_sample_idx.shape[0]), self.sub_sample_idx] = 1
+
         self.vm = self.compute_vander_monde_matrix()
+        self.sub_sampled_vm = self.sub_sample_matrix@self.vm
+
         if ytrain is None:
             self.ytrain = self.compute_model_prediction(theta=self.true_theta)
             noise = np.sqrt(model_noise_cov_scalar) * \
@@ -36,7 +46,7 @@ class linear_gaussian():
                     self.spatial_res).reshape(1, self.spatial_res)
             self.ytrain += noise
             if rank == 0:
-                np.save("ytrain.npy", self.ytrain)
+                np.save("ytrain_spatial_{}_without_sub_sampling_noise_.npy".format(self.spatial_res), self.ytrain)
         else:
             self.ytrain = ytrain
 
@@ -59,9 +69,16 @@ class linear_gaussian():
     def compute_log_likelihood(self, theta):
         """Function computes the log likelihood"""
         prediction = self.compute_model_prediction(theta)
-        error = self.ytrain - prediction
+        sub_sampled_prediction = self.sub_sample_output(prediction)
+        sub_sampled_ytrain = self.sub_sample_output(self.ytrain)
+        error = sub_sampled_ytrain - sub_sampled_prediction
         error_norm_sq = np.linalg.norm(error)**2
-        return -0.5*error_norm_sq/self.model_noise_cov_scalar
+        log_likelihood = -0.5*error_norm_sq/self.model_noise_cov_scalar
+        return log_likelihood
+
+    def sub_sample_output(self, output):
+        """Function sub-samples the output"""
+        return output[:, self.sub_sample_idx]
 
     def compute_log_prior(self, theta):
         """Function computes the log prior (unnormalized)"""
@@ -86,8 +103,8 @@ class linear_gaussian():
         """Fuction computes the evidence stats"""
         if itheta is None:
             evidence_mean = self.compute_model_prediction(
-                theta=self.prior_mean.ravel())
-            evidence_cov = self.vm@self.prior_cov@self.vm.T + self.model_noise_cov_mat
+                theta=self.prior_mean.ravel())@self.sub_sample_matrix.T
+            evidence_cov = self.sub_sampled_vm@self.prior_cov@self.sub_sampled_vm.T + self.sub_sample_matrix@self.model_noise_cov_mat@self.sub_sample_matrix.T
         else:
             evidence_mean = self.compute_model_prediction(
                 theta=self.prior_mean.ravel())
@@ -107,8 +124,8 @@ class linear_gaussian():
         prior_entropy = self.compute_gaussian_entropy(cov=self.prior_cov)
         print("prior entropy : {}".format(prior_entropy))
 
-        correlation = self.prior_cov@self.vm.T
-        d = self.num_parameters + self.spatial_res
+        correlation = self.prior_cov@(self.sub_sampled_vm).T
+        d = self.num_parameters + self.sub_sample_idx.shape[0]
         joint_mean = np.zeros((d, 1))
         joint_cov = np.zeros((d, d))
 
@@ -131,8 +148,10 @@ class linear_gaussian():
         # Definitions
         individual_mutual_information = np.zeros(self.num_parameters)
         evidence_mean, evidence_cov = self.compute_evidence_stats()
+
         total_corr = self.compute_correlation(
             parameter_pair=np.arange(self.num_parameters))
+
         total_joint_mean, total_joint_cov = self.build_joint(
             parameter_mean=self.prior_mean,
             parameter_cov=self.prior_cov,
@@ -181,13 +200,13 @@ class linear_gaussian():
     def compute_correlation(self, parameter_pair):
         """Function computes the correlation"""
         cov = np.diag(np.diag(self.prior_cov)[parameter_pair])
-        vm_selected = self.vm[:, parameter_pair]
+        vm_selected = self.sub_sample_matrix@self.vm[:, parameter_pair]
         return cov@vm_selected.T
 
     def build_joint(self, parameter_mean, parameter_cov, evidence_mean, evidence_cov, correlation):
         """Function builds the joint"""
         num_parameters = parameter_mean.shape[0]
-        dim = num_parameters + self.spatial_res
+        dim = num_parameters + evidence_mean.shape[1] 
         joint_mean = np.zeros((dim, 1))
         joint_cov = np.zeros((dim, dim))
         joint_mean[:num_parameters, :] = parameter_mean
@@ -211,8 +230,11 @@ class linear_gaussian():
 
     def estimate_mutual_information(self):
         """Function estimates the mutual information"""
+        def forward_model(theta):
+            return self.sub_sample_output(self.compute_model_prediction(theta))
+
         estimator = mutual_information(
-                forward_model=self.compute_model_prediction,
+                forward_model=forward_model,
                 prior_mean=self.prior_mean,
                 prior_cov=self.prior_cov,
                 model_noise_cov_scalar=self.model_noise_cov_scalar,
@@ -221,7 +243,7 @@ class linear_gaussian():
                 save_path=os.getcwd(),
                 restart=False,
                 log_file=self.log_file,
-                ytrain=self.ytrain
+                ytrain=self.sub_sample_output(self.ytrain)
                 )
 
         estimator.estimate_mutual_information_via_mc(
@@ -230,9 +252,11 @@ class linear_gaussian():
 
     def estimate_conditional_mutual_information(self):
         """Function estimates the conditional_mutual_information"""
+        def forward_model(theta):
+            return self.sub_sample_output(self.compute_model_prediction(theta))
 
         estimator = conditional_mutual_information(
-                forward_model=self.compute_model_prediction,
+                forward_model=forward_model,
                 prior_mean=self.prior_mean,
                 prior_cov=self.prior_cov,
                 model_noise_cov_scalar=self.model_noise_cov_scalar,
@@ -241,7 +265,7 @@ class linear_gaussian():
                 save_path=os.getcwd(),
                 restart=False,
                 log_file=self.log_file,
-                ytrain=self.ytrain
+                ytrain=self.sub_sample_output(self.ytrain)
                 )
 
         estimator.compute_individual_parameter_data_mutual_information_via_mc(
@@ -398,33 +422,45 @@ class linear_gaussian():
         self.prior_cov = new_cov
 
 
+def load_configuration_file(file_name="config.yaml"):
+    """Function loads the configuration form the config file"""
+    with open(file_name, 'r') as file:
+        data = yaml.safe_load(file)
+    return data
+
+
 def main():
-    num_samples = 100
+    # Load the config data
+    config_data = load_configuration_file()
+    # Extract the config
+    num_samples = config_data['num_samples']
+    num_sub_samples = config_data['num_sub_samples']
+    model_noise_cov_scalar = config_data['model_noise_cov_scalar']
+    objective_function_scaling = config_data['objective_scaling']
+    load_ytrain = config_data['load_ytrain']
+    load_parameter_estimate = config_data['load_parameter_estimate']
+    compute_map = config_data['compute_map']
+    compute_mle = config_data['compute_mle']
+    true_theta = np.array(config_data['true_theta'])
+    global_num_outer_samples = config_data['global_num_outer_samples']
+    global_num_inner_samples = config_data['global_num_inner_samples']
+    sub_sample_idx = np.load("sub_sample_idx_array_num_{}_spatial_res_{}.npy".format(num_sub_samples, num_samples))
+
+    #Input
     xtrain = np.linspace(-1, 1, num_samples)
-    model_noise_cov_scalar = 1e-1
-    objective_function_scaling = 1e-10
-    true_theta = np.arange(1, 4)
-
-    load_ytrain = True
-    load_parameter_estimate = True
-
-    compute_mle = False
-    compute_map = True
 
     if load_ytrain is False:
         ytrain = None
     else:
-        ytrain = np.load("ytrain.npy")
+        ytrain = np.load('ytrain_spatial_{}_without_sub_sampling_noise_{}.npy'.format(num_samples, model_noise_cov_scalar))
 
     if load_parameter_estimate is False:
         prior_mean = np.ones(true_theta.shape[0]).reshape(-1, 1)
         prior_cov = np.eye(true_theta.shape[0])
     else:
-        prior_mean = np.load("theta_mean.npy")
-        prior_cov = np.load("theta_cov.npy")
+        prior_mean = np.load("theta_mean_sub_{}_spatial_{}_noise_{}.npy".format(num_sub_samples, num_samples, model_noise_cov_scalar))
+        prior_cov = np.load("theta_cov_sub_{}_spatial_{}_noise_{}.npy".format(num_sub_samples, num_samples, model_noise_cov_scalar))
 
-    global_num_outer_samples = 10000
-    global_num_inner_samples = 10
 
     model = linear_gaussian(
         xtrain=xtrain,
@@ -434,7 +470,8 @@ def main():
         prior_cov=prior_cov,
         global_num_outer_samples=global_num_outer_samples,
         global_num_inner_samples=global_num_inner_samples,
-        ytrain=ytrain
+        ytrain=ytrain,
+        sub_sample_idx=sub_sample_idx
     )
 
     # Estimates
@@ -457,21 +494,19 @@ def main():
                 new_mean=new_mean,
                 new_cov=new_cov
                 )
-
         if rank == 0:
-            np.save("theta_mean.npy", model.prior_mean)
-            np.save("theta_cov.npy", model.prior_cov)
+            np.save("theta_mean_sub_{}_spatial_{}_noise_{}.npy".format(num_sub_samples, num_samples, model_noise_cov_scalar), model.prior_mean)
+            np.save("theta_cov_sub_{}_spatial_{}_noise_{}.npy".format(num_sub_samples, num_samples, model_noise_cov_scalar), model.prior_cov)
 
-    # print(model.prior_mean, model.prior_cov)
 
     # Theoretical estimates
     # model.compute_true_mutual_information()
-    model.compute_true_individual_parameter_data_mutual_information()
+    # model.compute_true_individual_parameter_data_mutual_information()
     # model.compute_true_pair_parameter_data_mutual_information()
 
     # Estimates
     # model.estimate_mutual_information()
-    # model.estimate_conditional_mutual_information()
+    model.estimate_conditional_mutual_information()
 
     if rank == 0:
         model.log_file.close()
