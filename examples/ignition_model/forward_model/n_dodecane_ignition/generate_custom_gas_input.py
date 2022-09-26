@@ -1,12 +1,13 @@
 import yaml
 from mpi4py import MPI
+import os
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 size = comm.Get_size()
 
 
-def gen_gas_file(reaction_1_pre_exp_factor, reaction_1_activation_energy):
+def gen_gas_file(reaction_1_pre_exp_factor, reaction_1_activation_energy, campaign_path=None):
     data = {
         "description": "Custom reaction for n-dodecane combustion",
 
@@ -189,8 +190,12 @@ def gen_gas_file(reaction_1_pre_exp_factor, reaction_1_activation_energy):
             }
         ]
     }
+    if campaign_path is not None:
+        file_path = os.path.join(campaign_path, "custom_gas_rank_"+str(rank)+".yaml")
+    else:
+        file_path = "./custom_gas_rank_"+str(rank)+".yaml"
 
-    with open("custom_gas_rank_"+str(rank)+".yaml", "w") as file:
+    with open(file_path, "w") as file:
         yaml.dump(data, file, sort_keys=False, default_flow_style=False)
 
 
