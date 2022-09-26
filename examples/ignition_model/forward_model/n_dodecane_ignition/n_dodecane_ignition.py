@@ -3,6 +3,7 @@ import cantera as ct
 import matplotlib.pyplot as plt
 from generate_custom_gas_input import gen_gas_file
 from mpi4py import MPI
+import os
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
@@ -12,7 +13,7 @@ plt.rc("text", usetex=True)
 plt.rc("font", family="serif", size=25)
 
 
-def n_dodecane_combustion(equivalence_ratio, initial_temp, pre_exponential_parameter=27.38, activation_energy=31944.0, initial_fuel_moles=1):
+def n_dodecane_combustion(equivalence_ratio, initial_temp, pre_exponential_parameter=27.38, activation_energy=31944.0, initial_fuel_moles=1, campaign_path=None):
     #  Compute the pre-exponential factor
     pre_exponential_factor = compute_pre_exponential_factor(
         equivalence_ratio=equivalence_ratio,
@@ -22,7 +23,8 @@ def n_dodecane_combustion(equivalence_ratio, initial_temp, pre_exponential_param
     # Update the gas file
     gen_gas_file(
         reaction_1_pre_exp_factor=float(pre_exponential_factor),
-        reaction_1_activation_energy=float(activation_energy)
+        reaction_1_activation_energy=float(activation_energy),
+        campaign_path=campaign_path
     )
 
     # Initial_conc
@@ -30,17 +32,24 @@ def n_dodecane_combustion(equivalence_ratio, initial_temp, pre_exponential_param
     moles_oxygen = moles_fuel/(equivalence_ratio*(1/18.5))
 
     # Initialize Model
-    gas = ct.Solution("./custom_gas_rank_"+str(rank)+".yaml")
+    if campaign_path is not None:
+        file_path = os.path.join(campaign_path, "custom_gas_rank_"+str(rank)+".yaml")
+    else:
+        file_path = "./custom_gas_rank_"+str(rank)+".yaml"
+    gas = ct.Solution(file_path)
     # # Assign initial concentration
     gas.X = {'C12H26': moles_fuel, 'O2': moles_oxygen}
-    # gas.TP = initial_temp, 101325
-    gas.TP = initial_temp, 6000000
+    gas.TP = initial_temp, 101325
+    # gas.TP = initial_temp, 6000000
 
     # Reactor
-    t_end = 1e-3
+    t_end = 1*1e-3
     reactor = ct.IdealGasConstPressureReactor(gas)
     sim = ct.ReactorNet([reactor])
     states = ct.SolutionArray(gas, extra=['t'])
+
+    sim.atol = 1e-15
+    sim.rtol = 1e-6
 
     # Adaptive stepping
     # while sim.time < t_end:
@@ -49,7 +58,7 @@ def n_dodecane_combustion(equivalence_ratio, initial_temp, pre_exponential_param
     #     states.append(reactor.thermo.state, t=sim.time)
 
     # Fixed step size
-    dt = 2e-7
+    dt = 5e-7
     for t in np.arange(0, t_end, dt):
         # print("Time : {0:.5f} [ms]".format(sim.time*1000))
         sim.advance(t)
@@ -62,7 +71,7 @@ def n_dodecane_combustion(equivalence_ratio, initial_temp, pre_exponential_param
         dt=dt
     )
 
-    """
+    # """
     fig, axs = plt.subplots(3, 2, figsize=(15, 8))
     axs[0, 0].plot(states.t, states.T, color='red', lw=2)
     axs[0, 0].scatter(auto_ignition_time, auto_ignition_temp,
@@ -98,11 +107,10 @@ def n_dodecane_combustion(equivalence_ratio, initial_temp, pre_exponential_param
     axs[2, 1].set_xscale("log")
 
     plt.tight_layout()
-    plt.savefig("n_dodecane_combustion.png")
-    plt.show()
+    figure_path = os.path.join(campaign_path, "true_n_dodecane_combustion_T_{}_phi_{}_rank_{}.png".format(initial_temp, equivalence_ratio, rank))
+    plt.savefig(figure_path)
+    plt.close()
     # """
-
-    # print("Ignition time : {} | temperature : {}".format(auto_ignition_time, auto_ignition_temp))
 
     return auto_ignition_time
 
@@ -143,13 +151,15 @@ def compute_pre_exponential_factor(pre_exponential_parameter, equivalence_ratio=
 
 def main():
     # Begin user input
-    equivalence_ratio = 0.1
+    equivalence_ratio = 0.5
     initial_temp = 1000  # K
     # End user input
 
     n_dodecane_combustion(
         equivalence_ratio=equivalence_ratio,
-        initial_temp=initial_temp
+        initial_temp=initial_temp,
+        pre_exponential_parameter=30.0,
+        activation_energy=35000.0
     )
 
 
