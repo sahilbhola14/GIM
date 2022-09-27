@@ -3,10 +3,13 @@ import matplotlib.pyplot as plt
 import yaml
 from scipy.optimize import minimize
 import sys
+import time
 import os
 from mpi4py import MPI
 sys.path.append("../forward_model/n_dodecane_ignition")
+sys.path.append("/home/sbhola/Documents/CASLAB/GIM/information_metrics")
 from n_dodecane_ignition import n_dodecane_combustion
+from compute_identifiability import mutual_information, conditional_mutual_information
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
@@ -17,7 +20,7 @@ plt.rc("font", family="serif", size=20)
 
 
 class ignition_model():
-    def __init__(self, model_inputs, true_theta, model_noise_cov, objective_scaling, prior_mean, prior_cov, ytrain, campaign_path):
+    def __init__(self, model_inputs, true_theta, model_noise_cov, objective_scaling, prior_mean, prior_cov, ytrain, campaign_path, global_num_outer_samples, global_num_inner_samples, restart):
         self.model_inputs = model_inputs
         self.true_theta = true_theta
         self.model_noise_cov = model_noise_cov
@@ -26,6 +29,9 @@ class ignition_model():
         self.prior_mean = prior_mean
         self.prior_cov = prior_cov
         self.campaign_path = campaign_path
+        self.global_num_outer_samples=global_num_outer_samples
+        self.global_num_inner_samples=global_num_inner_samples
+        self.restart=restart
 
         if rank == 0:
             log_file_name = os.path.join(self.campaign_path, "log_file.dat")
@@ -36,8 +42,10 @@ class ignition_model():
         noise = np.sqrt(self.model_noise_cov) * \
             np.random.randn(self.num_model_input_evals).reshape(self.num_model_input_evals, 1)
         if ytrain is None:
+            # tic = time.time()
             self.ytrain = self.compute_model_prediction(
-                theta=self.true_theta) + noise
+                theta=self.true_theta, save_plot=True) + noise
+            # print(time.time() - tic)
             ytrain_file_name = "ytrain_without_sub_sampling_noise_{}.npy".format(self.model_noise_cov)
             save_path = os.path.join(self.campaign_path, ytrain_file_name)
             np.save(save_path, self.ytrain)
@@ -45,9 +53,8 @@ class ignition_model():
             self.ytrain = ytrain
 
         self.write_log_file("Data procured")
-        breakpoint()
 
-    def compute_model_prediction(self, theta):
+    def compute_model_prediction(self, theta, save_plot=False):
         """Function comptues the model prediction"""
         pre_exponential_parameter, activation_energy = self.extract_parameters(
             theta=theta)
@@ -60,19 +67,16 @@ class ignition_model():
                 initial_temp=initial_temperature,
                 pre_exponential_parameter=pre_exponential_parameter,
                 activation_energy=activation_energy,
-                campaign_path=self.campaign_path
+                campaign_path=self.campaign_path,
+                save_plot=save_plot
             )
             prediction[ii, 0] = np.log(ignition_time)
         return prediction
 
     def extract_parameters(self, theta):
         """Function extracts the parameters given the theta"""
-        pre_exponential_parameter = theta[0]*5 + 25
-        activation_energy = theta[1]*5000 + 35000
-        # print('pre_exponential_parameter {}'.format(pre_exponential_parameter))
-        # print('activation_energy : {}'.format(activation_energy))
-        # pre_exponential_parameter = theta[0]
-        # activation_energy = theta[1]
+        pre_exponential_parameter = theta[0]
+        activation_energy = theta[1]
         return pre_exponential_parameter, activation_energy
 
     def compute_log_likelihood(self, theta):
@@ -86,7 +90,7 @@ class ignition_model():
     def compute_log_prior(self, theta):
         """Function computes the log prior"""
         error = (theta - self.prior_mean.ravel()).reshape(-1, 1)
-        exp_term_solve = self.prior_mean.T@np.linalg.solve(self.prior_cov, error)
+        exp_term_solve = error.T@np.linalg.solve(self.prior_cov, error)
         log_prior =  -0.5*exp_term_solve
         return log_prior.item()
 
@@ -103,11 +107,12 @@ class ignition_model():
             objective = -self.objective_scaling*self.compute_log_likelihood(theta)
             self.write_log_file("MLE objective : {0:.6e}".format(objective))
             return objective
+
         res = minimize(objective_function, theta_init,
                        method="Nelder-Mead")
         res = minimize(objective_function, res.x)
-        if res.sucess is False:
-            model.write_log_file("Numerical minima not found")
+        if res.success is False:
+            self.write_log_file("Numerical minima not found")
 
         self.write_log_file("MLE computation finished")
 
@@ -116,16 +121,16 @@ class ignition_model():
     def compute_map(self, theta_init):
         """Function comptues the map estimate"""
         def objective_function(theta):
-                    objective = -self.objective_scaling*self.compute_unnormalized_posterior(theta)
-                    self.write_log_file("MAP objective : {0:.6e}".format(objective))
-                    return objective
+            objective = -self.objective_scaling*self.compute_unnormalized_posterior(theta)
+            self.write_log_file("MAP objective : {0:.6e}".format(objective))
+            return objective
 
         res = minimize(objective_function, theta_init,
                        method="Nelder-Mead")
         res = minimize(objective_function, res.x)
 
-        if res.sucess is False:
-            model.write_log_file("Numerical minima not found")
+        if res.success is False:
+            self.write_log_file("Numerical minima not found")
 
         self.write_log_file("MAP computation finished")
 
@@ -149,7 +154,8 @@ class ignition_model():
         plt.xlabel(r"Temperature (K)")
         plt.ylabel(r"$\ln \Gamma$")
         plt.tight_layout()
-        plt.savefig("prediction.png")
+        figure_path = os.path.join(self.campaign_path, "prediction.png")
+        plt.savefig(figure_path)
         plt.close()
 
     def write_log_file(self, message):
@@ -159,6 +165,35 @@ class ignition_model():
             self.log_file.write(message+"\n")
             self.log_file.flush()
 
+    def estimate_conditional_mutual_information(self):
+        """Function estimates the conditional mutual information"""
+
+        def forward_model(theta):
+            return self.compute_model_prediction(theta)
+
+        estimator = conditional_mutual_information(
+                forward_model=forward_model,
+                prior_mean=self.prior_mean.reshape(-1, 1),
+                prior_cov=self.prior_cov,
+                model_noise_cov_scalar=self.model_noise_cov,
+                global_num_outer_samples=self.global_num_outer_samples,
+                global_num_inner_samples=self.global_num_inner_samples,
+                save_path=self.campaign_path,
+                restart=self.restart,
+                log_file=self.log_file,
+                ytrain=self.ytrain
+                )
+
+        estimator.compute_individual_parameter_data_mutual_information_via_mc(
+                use_quadrature=True,
+                single_integral_gaussian_quad_pts=5
+                )
+
+        estimator.compute_posterior_pair_parameter_mutual_information(
+                use_quadrature=True,
+                single_integral_gaussian_quad_pts=5,
+                double_integral_gaussian_quad_pts=5
+                )
 
 def load_configuration_file(file_name="config.yaml"):
     """Function loads the configuration file"""
@@ -209,6 +244,11 @@ def main():
     objective_scaling = config_data['objective_scaling']
     compute_mle = config_data['compute_mle']
     compute_map = config_data['compute_map']
+    global_num_outer_samples = config_data['global_num_outer_samples']
+    global_num_inner_samples = config_data['global_num_inner_samples']
+    restart = config_data['restart']
+
+
 
     load_parameter_estimate = config_data['load_parameter_estimate']
     load_ytrain = config_data['load_ytrain']
@@ -221,7 +261,6 @@ def main():
         ytrain = np.load(os.path.join(campaign_path, ytrain_file_name))
     else:
         ytrain = None
-
     # Load the parameters
     if load_parameter_estimate:
         parameter_mean_file_name = "theta_mean_noise_{}.npy".format(model_noise_cov)
@@ -229,8 +268,9 @@ def main():
         prior_mean = np.load(os.path.join(campaign_path, parameter_mean_file_name))
         prior_cov = np.load(os.path.join(campaign_path, parameter_cov_file_name))
     else:
-        prior_mean = np.zeros(true_theta.shape[0]).reshape(-1, 1)
+        prior_mean = np.zeros(true_theta.shape[0]).reshape(-1, 1) + np.array([27, 31000])[:, None]
         prior_cov = np.eye(true_theta.shape[0])
+        prior_cov[1, 1] = 1000000
 
 
     model = ignition_model(
@@ -241,7 +281,10 @@ def main():
         prior_mean=prior_mean,
         prior_cov=prior_cov,
         ytrain=ytrain,
-        campaign_path=campaign_path
+        campaign_path=campaign_path,
+        global_num_outer_samples=global_num_outer_samples,
+        global_num_inner_samples=global_num_inner_samples,
+        restart=restart
     )
 
     if load_parameter_estimate is False:
@@ -251,7 +294,7 @@ def main():
             updated_cov = np.eye(true_theta.shape[0])
         elif compute_map:
             theta_map, cov_map = model.compute_map(theta_init=prior_mean.ravel())
-            updated_mean = theta_map
+            updated_mean = theta_map.reshape(-1, 1)
             updated_cov = cov_map
         else:
             raise ValueError("Select an estimator type")
@@ -264,7 +307,14 @@ def main():
 
         # Update model prior
         model.parameter_prior(updated_mean=updated_mean, updated_cov=updated_cov)
+
+    # Plot the prediction
     model.plot_prediction(theta=prior_mean)
+
+    # Estimate the conditional mutual information
+    model.estimate_conditional_mutual_information()
+
+    # print(model.extract_parameters(model.prior_mean))
 
     # Close the write file
     if rank == 0:
