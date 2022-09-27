@@ -1,8 +1,18 @@
-temperature_inputs: [500, 600, 700, 800, 900]
-equivalence_ratio_inputs: [0.2]
-model_noise_cov: [0.01]
+campaign_id: 1
+temperature_inputs: [900, 1000, 1100]
+equivalence_ratio_inputs: [1.0]
+model_noise_cov: 1.0e-2
 true_theta: [27.38, 31944.0]
-objective_scaling: 1e-8
-load_theta_mle: True
+objective_scaling: 1.0e-12
 
+load_ytrain: True
+load_parameter_estimate: True
+
+compute_map: True
+compute_mle: False
+
+global_num_outer_samples: 10
+global_num_inner_samples: 1000
+
+restart: False
 
