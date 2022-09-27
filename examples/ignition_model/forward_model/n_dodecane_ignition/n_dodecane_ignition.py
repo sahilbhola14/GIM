@@ -13,7 +13,7 @@ plt.rc("text", usetex=True)
 plt.rc("font", family="serif", size=25)
 
 
-def n_dodecane_combustion(equivalence_ratio, initial_temp, pre_exponential_parameter=27.38, activation_energy=31944.0, initial_fuel_moles=1, campaign_path=None):
+def n_dodecane_combustion(equivalence_ratio, initial_temp, pre_exponential_parameter=27.38, activation_energy=31944.0, initial_fuel_moles=1, campaign_path=None, save_plot=False):
     #  Compute the pre-exponential factor
     pre_exponential_factor = compute_pre_exponential_factor(
         equivalence_ratio=equivalence_ratio,
@@ -43,7 +43,7 @@ def n_dodecane_combustion(equivalence_ratio, initial_temp, pre_exponential_param
     # gas.TP = initial_temp, 6000000
 
     # Reactor
-    t_end = 1*1e-3
+    t_end = 1.0*1e-3
     reactor = ct.IdealGasConstPressureReactor(gas)
     sim = ct.ReactorNet([reactor])
     states = ct.SolutionArray(gas, extra=['t'])
@@ -58,7 +58,7 @@ def n_dodecane_combustion(equivalence_ratio, initial_temp, pre_exponential_param
     #     states.append(reactor.thermo.state, t=sim.time)
 
     # Fixed step size
-    dt = 5e-7
+    dt = 9e-7
     for t in np.arange(0, t_end, dt):
         # print("Time : {0:.5f} [ms]".format(sim.time*1000))
         sim.advance(t)
@@ -72,44 +72,45 @@ def n_dodecane_combustion(equivalence_ratio, initial_temp, pre_exponential_param
     )
 
     # """
-    fig, axs = plt.subplots(3, 2, figsize=(15, 8))
-    axs[0, 0].plot(states.t, states.T, color='red', lw=2)
-    axs[0, 0].scatter(auto_ignition_time, auto_ignition_temp,
-                      marker='s', c="k", s=30, label="Auto ignition")
-    axs[0, 0].set_xlabel("time (s)")
-    axs[0, 0].set_ylabel(r"Temperature [K]", labelpad=20)
-    axs[0, 0].legend(loc="lower right")
-    axs[0, 0].set_xscale("log")
+    if save_plot:
+        fig, axs = plt.subplots(3, 2, figsize=(15, 8))
+        axs[0, 0].plot(states.t, states.T, color='red', lw=2)
+        axs[0, 0].scatter(auto_ignition_time, auto_ignition_temp,
+                        marker='s', c="k", s=30, label="Auto ignition")
+        axs[0, 0].set_xlabel("time (s)")
+        axs[0, 0].set_ylabel(r"Temperature [K]", labelpad=20)
+        axs[0, 0].legend(loc="lower right")
+        axs[0, 0].set_xscale("log")
 
-    axs[0, 1].plot(states.t, states('C12H26').X, color='r', lw=2)
-    axs[0, 1].set_xlabel("time (s)")
-    axs[0, 1].set_ylabel(r"$C_{12}H_{26}$", labelpad=20)
-    axs[0, 1].set_xscale("log")
+        axs[0, 1].plot(states.t, states('C12H26').X, color='r', lw=2)
+        axs[0, 1].set_xlabel("time (s)")
+        axs[0, 1].set_ylabel(r"$C_{12}H_{26}$", labelpad=20)
+        axs[0, 1].set_xscale("log")
 
-    axs[1, 0].plot(states.t, states('O2').X, color='r', lw=2)
-    axs[1, 0].set_xlabel("time (s)")
-    axs[1, 0].set_ylabel(r"$O_{2}$", labelpad=20)
-    axs[1, 0].set_xscale("log")
+        axs[1, 0].plot(states.t, states('O2').X, color='r', lw=2)
+        axs[1, 0].set_xlabel("time (s)")
+        axs[1, 0].set_ylabel(r"$O_{2}$", labelpad=20)
+        axs[1, 0].set_xscale("log")
 
-    axs[1, 1].plot(states.t, states('H2O').X, color='r', lw=2)
-    axs[1, 1].set_xlabel("time (s)")
-    axs[1, 1].set_ylabel(r"$H_{2}O$", labelpad=20)
-    axs[1, 1].set_xscale("log")
+        axs[1, 1].plot(states.t, states('H2O').X, color='r', lw=2)
+        axs[1, 1].set_xlabel("time (s)")
+        axs[1, 1].set_ylabel(r"$H_{2}O$", labelpad=20)
+        axs[1, 1].set_xscale("log")
 
-    axs[2, 0].plot(states.t, states('CO').X, color='r', lw=2)
-    axs[2, 0].set_xlabel("time (s)")
-    axs[2, 0].set_ylabel(r"$CO$", labelpad=20)
-    axs[2, 0].set_xscale("log")
+        axs[2, 0].plot(states.t, states('CO').X, color='r', lw=2)
+        axs[2, 0].set_xlabel("time (s)")
+        axs[2, 0].set_ylabel(r"$CO$", labelpad=20)
+        axs[2, 0].set_xscale("log")
 
-    axs[2, 1].plot(states.t, states('CO2').X, color='r', lw=2)
-    axs[2, 1].set_xlabel("time (s)")
-    axs[2, 1].set_ylabel(r"$CO_{2}$", labelpad=20)
-    axs[2, 1].set_xscale("log")
+        axs[2, 1].plot(states.t, states('CO2').X, color='r', lw=2)
+        axs[2, 1].set_xlabel("time (s)")
+        axs[2, 1].set_ylabel(r"$CO_{2}$", labelpad=20)
+        axs[2, 1].set_xscale("log")
 
-    plt.tight_layout()
-    figure_path = os.path.join(campaign_path, "true_n_dodecane_combustion_T_{}_phi_{}_rank_{}.png".format(initial_temp, equivalence_ratio, rank))
-    plt.savefig(figure_path)
-    plt.close()
+        plt.tight_layout()
+        figure_path = os.path.join(campaign_path, "true_n_dodecane_combustion_T_{}_phi_{}_rank_{}.png".format(initial_temp, equivalence_ratio, rank))
+        plt.savefig(figure_path)
+        plt.close()
     # """
 
     return auto_ignition_time
