@@ -9,7 +9,7 @@ from itertools import combinations
 import os
 import shutil
 import matplotlib.pyplot as plt
-sys.path.append("/scratch/kdur_root/kdur/sbhola/GIM/quadrature")
+sys.path.append("/home/sbhola/Documents/CASLAB/GIM/quadrature")
 from quadrature import unscented_quadrature, gauss_hermite_quadrature
 
 comm = MPI.COMM_WORLD
@@ -159,9 +159,8 @@ class mutual_information():
         error_norm_sq = np.linalg.norm(error, axis=1)**2
         pre_exp = 1 / ((2*np.pi*self.model_noise_cov_scalar)
                        ** (self.spatial_res/2))
-        assert(data.shape[0] ==
-               1), "need to tweek pre-exp for multiple samples"
-        likelihood = pre_exp * \
+
+        likelihood = (pre_exp**self.num_data_samples) * \
             np.exp(-0.5*np.sum(error_norm_sq / self.model_noise_cov_scalar, axis=0))
         return likelihood
 
@@ -887,7 +886,7 @@ class conditional_mutual_information(mutual_information):
                 num_gaussian_quad_pts=num_gaussian_quad_pts,
                 case_type=case_type,
                 parent_pair=parent_pair,
-                importance_sampling_cov_factors=[1e-3, 1e-6],
+                importance_sampling_cov_factors=[1e-3, 1e-6, 1e-9, 1e-10],
             )
         else:
             assert(self.restart is False), "Error"
@@ -1169,10 +1168,9 @@ class conditional_mutual_information(mutual_information):
 
         error = outer_sample - model_prediction
         error_norm_sq = np.linalg.norm(error, axis=1)**2
-        sample_evidence_estimates = pre_exp * \
+        sample_evidence_estimates = (pre_exp**self.num_data_samples) * \
             np.exp(-0.5*np.sum(error_norm_sq /
                                self.model_noise_cov_scalar, axis=0))
-
 
         return sample_evidence_estimates.reshape(1, -1)
 
