@@ -1,4 +1,5 @@
 import numpy as np
+import time
 import matplotlib.pyplot as plt
 import yaml
 from scipy.optimize import minimize
@@ -6,9 +7,9 @@ import sys
 import time
 import os
 from mpi4py import MPI
-sys.path.append("../forward_model/n_dodecane_ignition")
+sys.path.append("/home/sbhola/Documents/CASLAB/GIM/examples/ignition_model/forward_model/methane_combustion")
 sys.path.append("/home/sbhola/Documents/CASLAB/GIM/information_metrics")
-from n_dodecane_ignition import n_dodecane_combustion
+from combustion import mech_1S_CH4_Westbrook, mech_2S_CH4_Westbrook
 from compute_identifiability import mutual_information, conditional_mutual_information
 
 comm = MPI.COMM_WORLD
@@ -17,308 +18,175 @@ size = comm.Get_size()
 
 plt.rc("text", usetex=True)
 plt.rc("font", family="serif", size=20)
+plt.rc("lines", linewidth=2)
+plt.rc("axes", labelpad=30, titlepad=20)
 
-
-class ignition_model():
-    def __init__(self, model_inputs, true_theta, model_noise_cov, objective_scaling, prior_mean, prior_cov, ytrain, campaign_path, global_num_outer_samples, global_num_inner_samples, restart):
-        self.model_inputs = model_inputs
-        self.true_theta = true_theta
-        self.model_noise_cov = model_noise_cov
-        self.num_model_input_evals = self.model_inputs.shape[0]
-        self.objective_scaling = objective_scaling
+class learn_ignition_model():
+    def __init__(self, config_data, campaign_path, prior_mean, prior_cov):
+        """Atribute initialization"""
+        # Prior
         self.prior_mean = prior_mean
         self.prior_cov = prior_cov
+        self.num_parameters = self.prior_mean.shape[0]
+
+        # Extract configurations
         self.campaign_path = campaign_path
-        self.global_num_outer_samples=global_num_outer_samples
-        self.global_num_inner_samples=global_num_inner_samples
-        self.restart=restart
+        self.equivalence_ratio = config_data["equivalence_ratio"]
+        self.initial_temperature = config_data["initial_temperature"]
+        self.initial_pressure = config_data["initial_pressure"]
+        self.model_noise_cov = config_data["model_noise_cov"]
+        assert(len(self.initial_temperature) == len(self.initial_pressure) == len(self.equivalence_ratio)), "Provide input config for all cases"
 
-        if rank == 0:
-            log_file_name = os.path.join(self.campaign_path, "log_file.dat")
-            self.log_file = open(log_file_name, "w")
-        else:
-            self.log_file = None
+        # Traning data
+        self.ytrain = np.load(os.path.join(self.campaign_path, "ytrain.npy"))
+        self.spatial_resolution = self.ytrain.shape[1]
+        self.num_data_points = len(self.initial_temperature)
+        self.objective_scaling = config_data["objective_scaling"]
 
-        noise = np.sqrt(self.model_noise_cov) * \
-            np.random.randn(self.num_model_input_evals).reshape(self.num_model_input_evals, 1)
-        if ytrain is None:
-            # tic = time.time()
-            self.ytrain = self.compute_model_prediction(
-                theta=self.true_theta, save_plot=True) + noise
-            # print(time.time() - tic)
-            ytrain_file_name = "ytrain_without_sub_sampling_noise_{}.npy".format(self.model_noise_cov)
-            save_path = os.path.join(self.campaign_path, ytrain_file_name)
-            np.save(save_path, self.ytrain)
-        else:
-            self.ytrain = ytrain
+    def compute_Arrehenius_A(self, theta, equivalence_ratio, initial_temperature):
+        """Function computes the pre exponential factor, A for the Arrhenius rate"""
+        lambda_1 = 20 + (2)*theta[0] 
+        lambda_2 = theta[1] 
+        lambda_3 = theta[2] 
+        log_A = lambda_1 + np.tanh((lambda_2 + lambda_3*equivalence_ratio)*(initial_temperature/1000))
+        return np.exp(log_A)
 
-        self.write_log_file("Data procured")
+    def compute_Arrehenius_Ea(self, theta):
+        """Function computes the Arrhenius activation energy"""
+        Arrhenius_Ea = 30000 + 10000*theta[3]
+        return Arrhenius_Ea
 
-    def compute_model_prediction(self, theta, save_plot=False):
-        """Function comptues the model prediction"""
-        pre_exponential_parameter, activation_energy = self.extract_parameters(
-            theta=theta)
-        prediction = np.zeros((self.num_model_input_evals, 1))
+    def compute_model_prediction(self, theta):
+        """Function computes the model prediction, Temperature"""
+        prediction = np.zeros((self.num_data_points, self.spatial_resolution))
 
-        for ii in range(self.num_model_input_evals):
-            initial_temperature, equivalence_ratio = self.model_inputs[ii, :]
-            ignition_time = n_dodecane_combustion(
-                equivalence_ratio=equivalence_ratio,
-                initial_temp=initial_temperature,
-                pre_exponential_parameter=pre_exponential_parameter,
-                activation_energy=activation_energy,
-                campaign_path=self.campaign_path,
-                save_plot=save_plot
-            )
-            prediction[ii, 0] = np.log(ignition_time)
+        # Arrhenius_Ea = self.compute_Arrehenius_Ea(theta)
+
+        for idata_sample in range(self.num_data_points):
+            Arrhenius_A = self.compute_Arrehenius_A(
+                    theta=theta,
+                    equivalence_ratio=self.equivalence_ratio[idata_sample],
+                    initial_temperature=self.initial_temperature[idata_sample]
+                    )
+            # print(Arrhenius_A, Arrhenius_Ea)
+            combustion_model = mech_1S_CH4_Westbrook(
+                    initial_temperature=self.initial_temperature[idata_sample],
+                    initial_pressure=self.initial_pressure[idata_sample],
+                    equivalence_ratio=self.equivalence_ratio[idata_sample],
+                    Arrhenius_A=Arrhenius_A,
+                    # Arrhenius_Ea=Arrhenius_Ea,
+                    )
+
+            states = combustion_model.mech_1S_CH4_Westbrook_combustion()
+
+            prediction[idata_sample, :] = states.T
+
         return prediction
 
-    def extract_parameters(self, theta):
-        """Function extracts the parameters given the theta"""
-        pre_exponential_parameter = theta[0]
-        activation_energy = theta[1]
-        return pre_exponential_parameter, activation_energy
-
     def compute_log_likelihood(self, theta):
-        """Function comptuest the log likelihood"""
-        prediction = self.compute_model_prediction(theta)
+        """Function comptues the log likelihood"""
+        prediction = self.compute_model_prediction(theta=theta)
         error = self.ytrain - prediction
-        error_norm_sq = np.linalg.norm(error)**2
-        log_likelihood = -0.5*error_norm_sq/self.model_noise_cov
+        error_norm_sq = np.linalg.norm(error, axis=1)**2
+        log_likelihood = (-0.5/self.model_noise_cov)*(np.sum(error_norm_sq))
         return log_likelihood
 
     def compute_log_prior(self, theta):
         """Function computes the log prior"""
-        error = (theta - self.prior_mean.ravel()).reshape(-1, 1)
-        exp_term_solve = error.T@np.linalg.solve(self.prior_cov, error)
-        log_prior =  -0.5*exp_term_solve
-        return log_prior.item()
+        error = (theta - self.prior_mean).reshape(-1, 1)
+        error_norm_sq = (error.T@np.linalg.solve(self.prior_cov, error)).item()
+        log_prior = -0.5*error_norm_sq
+        return log_prior
 
-    def compute_unnormalized_posterior(self, theta):
-        """Function computes the unnormalized posterior"""
-        log_likelihood = self.compute_log_likelihood(theta)
-        log_prior = self.compute_log_prior(theta)
-        log_posterior = log_likelihood + log_prior
-        return log_posterior
-
-    def compute_mle(self, theta_init):
-        """Function comptues the mle"""
+    def compute_mle(self):
+        """Function comptues the MLE"""
+        theta_init = np.random.randn(self.num_parameters)
+        
         def objective_function(theta):
-            objective = -self.objective_scaling*self.compute_log_likelihood(theta)
-            self.write_log_file("MLE objective : {0:.6e}".format(objective))
-            return objective
+            objective_function = - self.objective_scaling*self.compute_log_likelihood(theta)
+            print("MLE objective : {0:.18e}".format(objective_function))
+            return objective_function
 
-        res = minimize(objective_function, theta_init,
-                       method="Nelder-Mead")
+        res = minimize(objective_function, theta_init, method="Nelder-Mead")
         res = minimize(objective_function, res.x)
-        if res.success is False:
-            self.write_log_file("Numerical minima not found")
-
-        self.write_log_file("MLE computation finished")
-
+        print(res)
+        print(self.compute_Arrehenius_A(res.x, self.equivalence_ratio[0], self.initial_temperature[0]))
+        prediction_init = self.compute_model_prediction(theta=theta_init)
+        prediction_mle = self.compute_model_prediction(theta=res.x)
+        plt.figure()
+        plt.plot(prediction_init.ravel(), label="Init")
+        plt.plot(self.ytrain.ravel(), label="data")
+        plt.plot(prediction_mle.ravel(), label="MLE")
+        plt.legend()
+        plt.show()
         return res.x
 
-    def compute_map(self, theta_init):
-        """Function comptues the map estimate"""
-        def objective_function(theta):
-            objective = -self.objective_scaling*self.compute_unnormalized_posterior(theta)
-            self.write_log_file("MAP objective : {0:.6e}".format(objective))
-            return objective
+    def compute_unnormalized_posterior(self, theta):
+        log_likelihood = self.compute_log_likelihood(theta)
+        log_prior = self.compute_log_prior(theta)
+        unnormalized_log_post = log_likelihood + log_prior
 
-        res = minimize(objective_function, theta_init,
-                       method="Nelder-Mead")
+        return unnormalized_log_post
+
+    def compute_map(self):
+        """Function computes the map estimate"""
+        theta_init = np.random.randn(self.num_parameters)
+        
+        def objective_function(theta):
+            objective_function = - self.objective_scaling*self.compute_unnormalized_posterior(theta)
+            print("MAP objective : {0:.18e}".format(objective_function))
+            return objective_function
+
+        res = minimize(objective_function, theta_init, method="Nelder-Mead")
         res = minimize(objective_function, res.x)
 
-        if res.success is False:
-            self.write_log_file("Numerical minima not found")
-
-        self.write_log_file("MAP computation finished")
-
-        theta_map = res.x
-        cov_approx = res.hess_inv
-
-        return theta_map, cov_approx
-
-    def parameter_prior(self, updated_mean, updated_cov):
-        """Function updates the parameter prior"""
-        self.prior_mean = updated_mean
-        self.prior_cov = updated_cov
-
-    def plot_prediction(self, theta):
-        """Function plots the prediction"""
-        prediction = self.compute_model_prediction(theta)
+        print(res)
+        print(self.compute_Arrehenius_A(res.x, self.equivalence_ratio[0], self.initial_temperature[0]))
+        prediction_init = self.compute_model_prediction(theta=theta_init)
+        prediction_mle = self.compute_model_prediction(theta=res.x)
         plt.figure()
-        plt.scatter(self.model_inputs[:, 0], self.ytrain.ravel(), c="k", s=30, label="Data")
-        plt.scatter(self.model_inputs[:, 0], prediction.ravel(), c="r", s=30, label="Prediction")
+        plt.plot(prediction_init.ravel(), label="Init")
+        plt.plot(self.ytrain.ravel(), label="data")
+        plt.plot(prediction_mle.ravel(), label="MAP")
         plt.legend()
-        plt.xlabel(r"Temperature (K)")
-        plt.ylabel(r"$\ln \Gamma$")
-        plt.tight_layout()
-        figure_path = os.path.join(self.campaign_path, "prediction.png")
-        plt.savefig(figure_path)
-        plt.close()
+        plt.show()
 
-    def write_log_file(self, message):
-        """Function writes the message on the log file"""
-        if rank == 0:
-            assert(self.log_file is not None), "log file must be provided"
-            self.log_file.write(message+"\n")
-            self.log_file.flush()
-
-    def estimate_conditional_mutual_information(self):
-        """Function estimates the conditional mutual information"""
-
-        def forward_model(theta):
-            return self.compute_model_prediction(theta)
-
-        estimator = conditional_mutual_information(
-                forward_model=forward_model,
-                prior_mean=self.prior_mean.reshape(-1, 1),
-                prior_cov=self.prior_cov,
-                model_noise_cov_scalar=self.model_noise_cov,
-                global_num_outer_samples=self.global_num_outer_samples,
-                global_num_inner_samples=self.global_num_inner_samples,
-                save_path=self.campaign_path,
-                restart=self.restart,
-                log_file=self.log_file,
-                ytrain=self.ytrain
-                )
-
-        estimator.compute_individual_parameter_data_mutual_information_via_mc(
-                use_quadrature=True,
-                single_integral_gaussian_quad_pts=5
-                )
-
-        estimator.compute_posterior_pair_parameter_mutual_information(
-                use_quadrature=True,
-                single_integral_gaussian_quad_pts=5,
-                double_integral_gaussian_quad_pts=5
-                )
-
-def load_configuration_file(file_name="config.yaml"):
+def load_configuration_file(config_file_path="./config.yaml"):
     """Function loads the configuration file"""
-    with open(file_name, 'r') as config:
-        config_data = yaml.safe_load(config)
+    with open(config_file_path, "r") as config_file:
+        config_data = yaml.safe_load(config_file)
+    print("Loaded %s configuration file"%(config_file_path))
     return config_data
 
-def generate_model_inputs(config_data):
-    """Function gathers the model inputs"""
-    # Reading the config file
-    temperature_config = config_data['temperature_inputs']
-    equivalence_ratio_config = config_data['equivalence_ratio_inputs']
-
-    num_temp_points = len(temperature_config)
-    num_equivalence_points = len(equivalence_ratio_config)
-
-    if num_temp_points == num_equivalence_points:
-        temperature = np.array(temperature_config)
-        equivalence_ratio = np.array(equivalence_ratio_config)
-    else:
-        if (num_equivalence_points == 1):
-            print("Using the same equivalence ratio for all temperature inputs")
-            equivalence_ratio = np.array(
-                equivalence_ratio_config*num_temp_points)
-            temperature = np.array(temperature_config)
-        elif (num_temp_points == 1):
-            print("Using same temperature inputs for all the equivalence ratios")
-            temperature = np.array(temperature_config*num_equivalence_points)
-            equivalence_ratio = np.array(equivalence_ratio_config)
-        else:
-            raise ValueError(
-                "Invalid number of temperature and equivalence ratio inputs")
-
-    inputs = np.zeros((max(num_equivalence_points, num_temp_points), 2))
-    inputs[:, 0] = temperature
-    inputs[:, 1] = equivalence_ratio
-
-
-    return inputs
-
 def main():
-    # Input configuration
-    config_data = load_configuration_file()
-    campaign_id = config_data['campaign_id']
-    model_inputs = generate_model_inputs(config_data)
-    true_theta = np.array(config_data['true_theta'])
-    model_noise_cov = config_data['model_noise_cov']
-    objective_scaling = config_data['objective_scaling']
-    compute_mle = config_data['compute_mle']
-    compute_map = config_data['compute_map']
-    global_num_outer_samples = config_data['global_num_outer_samples']
-    global_num_inner_samples = config_data['global_num_inner_samples']
-    restart = config_data['restart']
+    # Begin user input
+    prior_mean = np.zeros(3)
+    prior_cov = np.eye(3)
+    # End user input
 
+    # Load the configurations
+    config_data = load_configuration_file() 
 
+    # Campaign path
+    campaign_path = os.path.join(os.getcwd(), "campaign_results/campaign_%d"%(config_data["campaign_id"]))
 
-    load_parameter_estimate = config_data['load_parameter_estimate']
-    load_ytrain = config_data['load_ytrain']
+    # Learning model
+    learning_model = learn_ignition_model(
+            config_data=config_data,
+            campaign_path=campaign_path,
+            prior_mean=prior_mean,
+            prior_cov=prior_cov
+            )
 
-    campaign_path = os.path.join(os.getcwd(), "campaign_results/campaign_{}".format(campaign_id))
-
-    # Load the data
-    if load_ytrain:
-        ytrain_file_name = "ytrain_without_sub_sampling_noise_{}.npy".format(model_noise_cov)
-        ytrain = np.load(os.path.join(campaign_path, ytrain_file_name))
+    if config_data['compute_mle']:
+        learning_model.compute_mle()
+    elif config_data['compute_map']:
+        learning_model.compute_map()
     else:
-        ytrain = None
-    # Load the parameters
-    if load_parameter_estimate:
-        parameter_mean_file_name = "theta_mean_noise_{}.npy".format(model_noise_cov)
-        parameter_cov_file_name = "theta_cov_noise_{}.npy".format(model_noise_cov)
-        prior_mean = np.load(os.path.join(campaign_path, parameter_mean_file_name))
-        prior_cov = np.load(os.path.join(campaign_path, parameter_cov_file_name))
-    else:
-        prior_mean = np.zeros(true_theta.shape[0]).reshape(-1, 1) + np.array([27, 31000])[:, None]
-        prior_cov = np.eye(true_theta.shape[0])
-        prior_cov[1, 1] = 1000000
+        raise ValueError("Invalid selection")
 
-
-    model = ignition_model(
-        model_inputs=model_inputs,
-        true_theta=true_theta,
-        model_noise_cov=model_noise_cov,
-        objective_scaling=objective_scaling,
-        prior_mean=prior_mean,
-        prior_cov=prior_cov,
-        ytrain=ytrain,
-        campaign_path=campaign_path,
-        global_num_outer_samples=global_num_outer_samples,
-        global_num_inner_samples=global_num_inner_samples,
-        restart=restart
-    )
-
-    if load_parameter_estimate is False:
-        if compute_mle:
-            theta_mle = model.compute_mle(theta_init=prior_mean.ravel())
-            updated_mean = theta_mle.reshape(-1, 1)
-            updated_cov = np.eye(true_theta.shape[0])
-        elif compute_map:
-            theta_map, cov_map = model.compute_map(theta_init=prior_mean.ravel())
-            updated_mean = theta_map.reshape(-1, 1)
-            updated_cov = cov_map
-        else:
-            raise ValueError("Select an estimator type")
-
-        parameter_mean_file_name = "theta_mean_noise_{}.npy".format(model_noise_cov)
-        parameter_cov_file_name = "theta_cov_noise_{}.npy".format(model_noise_cov)
-
-        np.save(os.path.join(campaign_path, parameter_mean_file_name), updated_mean)
-        np.save(os.path.join(campaign_path, parameter_cov_file_name), updated_cov)
-
-        # Update model prior
-        model.parameter_prior(updated_mean=updated_mean, updated_cov=updated_cov)
-
-    # Plot the prediction
-    model.plot_prediction(theta=prior_mean)
-
-    # Estimate the conditional mutual information
-    model.estimate_conditional_mutual_information()
-
-    # print(model.extract_parameters(model.prior_mean))
-
-    # Close the write file
-    if rank == 0:
-        model.log_file.close()
-
-if __name__ == "__main__":
+if __name__=="__main__":
     main()
+
+
+
