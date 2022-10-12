@@ -10,6 +10,11 @@ plt.rc("text", usetex=True)
 plt.rc("font", family="serif", size=25)
 plt.rc("lines", linewidth=3)
 plt.rc("axes", labelpad=18, titlepad=20)
+plt.rc("legend", fontsize=18, framealpha=1.0)
+plt.rc("xtick.major", size=6)
+plt.rc("xtick.minor", size=4)
+plt.rc("ytick.major", size=6)
+plt.rc("ytick.minor", size=4)
 
 
 class mech_1S_CH4_MP1():
@@ -173,6 +178,26 @@ class mech_1S_CH4_MP1():
 
         return gas_file
 
+    def compute_adiabatic_temperature(self):
+        """Function computes the adiabatic temperature"""
+        gas = ct.Solution(yaml = self.get_1S_CH4_MP1_gas_file())
+        gas.TP = self.initial_temperature, self.initial_pressure
+        gas.set_equivalence_ratio(self.equivalence_ratio, "CH4", "O2:1, N2:3.76")
+        gas.equilibrate("HP")
+        return gas.T
+
+    def compute_equilibrate_species_concentration(self, species_names):
+        """Function computest the equilibrate species concentration"""
+        gas = ct.Solution(yaml = self.get_1S_CH4_MP1_gas_file())
+        gas.TP = self.initial_temperature, self.initial_pressure
+        gas.set_equivalence_ratio(self.equivalence_ratio, "CH4", "O2:1, N2:3.76")
+        gas.equilibrate("HP")
+
+        gas.selected_species = species_names
+        species_final_mole_fraction = gas.X
+
+        return species_final_mole_fraction
+
 
 class mech_gri():
     def __init__(self, initial_temperature, initial_pressure, equivalence_ratio):
@@ -199,6 +224,47 @@ class mech_gri():
             states.append(reactor.thermo.state, t=t)
 
         return states
+
+    def compute_adiabatic_temperature(self):
+        """Function computes the adiabatic temperature"""
+        gas = ct.Solution("gri30.yaml")
+        gas.TP = self.initial_temperature, self.initial_pressure
+        gas.set_equivalence_ratio(self.equivalence_ratio, "CH4", "O2:1, N2:3.76")
+        gas.equilibrate("HP")
+        return gas.T
+
+    def compute_equilibrate_species_concentration(self, species_names):
+        """Function computest the equilibrate species concentration"""
+        gas = ct.Solution("gri30.yaml")
+        gas.TP = self.initial_temperature, self.initial_pressure
+        gas.set_equivalence_ratio(self.equivalence_ratio, "CH4", "O2:1, N2:3.76")
+        gas.equilibrate("HP")
+
+        gas.selected_species = species_names
+        species_final_mole_fraction = gas.X
+
+        return species_final_mole_fraction
+
+    def compute_ignition_time(self):
+        """Function computes the ignition temperature"""
+        gas = ct.Solution("gri30.yaml")
+        gas.TP = self.initial_temperature, self.initial_pressure
+        gas.set_equivalence_ratio(self.equivalence_ratio, "CH4", "O2:1, N2:3.76")
+        dt = 1e-6
+        t_end = 2000*1e-3
+        reactor = ct.IdealGasConstPressureReactor(gas)
+        sim = ct.ReactorNet([reactor])
+        states = ct.SolutionArray(gas, extra=['t'])
+        sim.atol = 1e-15
+        sim.rtol = 1e-6
+
+        while sim.time < t_end:
+            sim.step()
+            states.append(reactor.thermo.state, t=sim.time)
+
+        ignition_time, ignition_temperature = compute_ignition_stats(temperature=states.T, time=states.t)
+
+        return ignition_time
 
 
 class mech_1S_CH4_Westbrook():
@@ -239,6 +305,9 @@ class mech_1S_CH4_Westbrook():
 
     def get_1S_CH4_Westbrook_gas_file(self):
         """Function returns the gas file for 1S_CH4_MP1 mechanism"""
+        negative_orders_flag = False
+        if ((self.Arrhenius_a or self.Arrhenius_b) < 0):
+            negative_orders_flag=True
 
         gas_file = '''
 
@@ -356,10 +425,50 @@ class mech_1S_CH4_Westbrook():
             - equation: CH4 + 2 O2 => CO2 + 2 H2O
               rate-constant: {A: %f, b: 0, Ea: %f}
               orders: {CH4: %f, O2: %f}
-              negative-orders: True
-        '''%(self.Arrhenius_A, self.Arrhenius_Ea, self.Arrhenius_a, self.Arrhenius_b)
-
+              negative-orders: %s 
+        '''%(self.Arrhenius_A, self.Arrhenius_Ea, self.Arrhenius_a, self.Arrhenius_b, negative_orders_flag)
         return gas_file
+
+    def compute_adiabatic_temperature(self):
+        """Function computes the adiabatic temperature"""
+        gas = ct.Solution(yaml = self.get_1S_CH4_Westbrook_gas_file())
+        gas.TP = self.initial_temperature, self.initial_pressure
+        gas.set_equivalence_ratio(self.equivalence_ratio, "CH4", "O2:1, N2:3.76")
+        gas.equilibrate("HP")
+        return gas.T
+
+    def compute_equilibrate_species_concentration(self, species_names):
+        """Function computest the equilibrate species concentration"""
+        gas = ct.Solution(yaml = self.get_1S_CH4_Westbrook_gas_file())
+        gas.TP = self.initial_temperature, self.initial_pressure
+        gas.set_equivalence_ratio(self.equivalence_ratio, "CH4", "O2:1, N2:3.76")
+        gas.equilibrate("HP")
+
+        gas.selected_species = species_names
+        species_final_mole_fraction = gas.X
+
+        return species_final_mole_fraction
+
+    def compute_ignition_time(self):
+        """Function computes the ignition temperature"""
+        gas = ct.Solution(yaml = self.get_1S_CH4_Westbrook_gas_file())
+        gas.TP = self.initial_temperature, self.initial_pressure
+        gas.set_equivalence_ratio(self.equivalence_ratio, "CH4", "O2:1, N2:3.76")
+        dt = 1e-6
+        t_end = 2000*1e-3
+        reactor = ct.IdealGasConstPressureReactor(gas)
+        sim = ct.ReactorNet([reactor])
+        states = ct.SolutionArray(gas, extra=['t'])
+        sim.atol = 1e-15
+        sim.rtol = 1e-6
+
+        while sim.time < t_end:
+            sim.step()
+            states.append(reactor.thermo.state, t=sim.time)
+
+        ignition_time, ignition_temperature = compute_ignition_stats(temperature=states.T, time=states.t)
+
+        return ignition_time
 
 
 class mech_2S_CH4_Westbrook():
@@ -544,87 +653,314 @@ class mech_2S_CH4_Westbrook():
 
         return gas_file
 
+    def compute_adiabatic_temperature(self):
+        """Function computes the adiabatic temperature"""
+        gas = ct.Solution(yaml = self.get_2S_CH4_Westbrook_gas_file())
+        gas.TP = self.initial_temperature, self.initial_pressure
+        gas.set_equivalence_ratio(self.equivalence_ratio, "CH4", "O2:1, N2:3.76")
+        gas.equilibrate("HP")
+        return gas.T
+
+    def compute_equilibrate_species_concentration(self, species_names):
+        """Function computest the equilibrate species concentration"""
+        gas = ct.Solution(yaml = self.get_2S_CH4_Westbrook_gas_file())
+        gas.TP = self.initial_temperature, self.initial_pressure
+        gas.set_equivalence_ratio(self.equivalence_ratio, "CH4", "O2:1, N2:3.76")
+        gas.equilibrate("HP")
+
+        gas.selected_species = species_names
+        species_final_mole_fraction = gas.X
+
+        return species_final_mole_fraction
+
+    def compute_ignition_time(self):
+        """Function computes the ignition temperature"""
+        gas = ct.Solution(yaml = self.get_2S_CH4_Westbrook_gas_file())
+        gas.TP = self.initial_temperature, self.initial_pressure
+        gas.set_equivalence_ratio(self.equivalence_ratio, "CH4", "O2:1, N2:3.76")
+        dt = 1e-6
+        t_end = 2000*1e-3
+        reactor = ct.IdealGasConstPressureReactor(gas)
+        sim = ct.ReactorNet([reactor])
+        states = ct.SolutionArray(gas, extra=['t'])
+        sim.atol = 1e-15
+        sim.rtol = 1e-6
+
+        while sim.time < t_end:
+            sim.step()
+            states.append(reactor.thermo.state, t=sim.time)
+
+        ignition_time, ignition_temperature = compute_ignition_stats(temperature=states.T, time=states.t)
+
+        return ignition_time
+
+
+def compute_ignition_stats(temperature, time):
+    dt_array = time[1:] - time[0:-1]
+    temperature_derivative = np.zeros_like(temperature)
+    temperature_derivative[0] = (temperature[1] - temperature[0]) / dt_array[0]
+    temperature_derivative[-1] = (temperature[-1] - temperature[-2]) / dt_array[-2]
+    temperature_derivative[1:-1] = (temperature[2:] - temperature[0:-2]) / (dt_array[1:] + dt_array[:-1])
+    ignition_temperature = temperature[ np.argmax(temperature_derivative) ]
+    ignition_time = time[ np.argmax(temperature_derivative) ]
+
+    # plt.figure()
+    # plt.subplot(1, 2, 1)
+    # plt.xscale("log")
+    # plt.plot(time, temperature)
+    # plt.subplot(1, 2, 2)
+    # plt.plot(time, temperature_derivative)
+    # plt.xscale("log")
+    # plt.show()
+    # breakpoint()
+
+    return ignition_time, ignition_temperature
 
 def main():
     # Begin user input
-    initial_temperature = 1500 # K
-    initial_pressure = 101325 # Pa
-    equivalence_ratio = 1.0
+    initial_temperature = 300 # K
+    initial_pressure = 100000 # Pa
+    equivalence_ratio = 1.0 # For transient cases
+    eval_equivalence_ratio_adiabatic = np.linspace(0.5, 1.5, 100) # For equilibrium studies
+    eval_auto_ignition_temp = np.linspace(1000, 2000, 5)
+    # eval_auto_ignition_temp = np.array([2500])
     # End user input
 
-    # GRIMech3.0 combustion model
-    tic = time.time()
-    gri_model = mech_gri(initial_temperature, initial_pressure, equivalence_ratio)
-    gri_states = gri_model.gri_combustion()
-    toc = time.time()
-    print("Compute time GRIMech3.0 : {0:.5f} [s]".format(toc-tic))
+    ## GRIMech3.0 combustion model
+    # gri_eval_species_name = ['CO2', 'CO', 'H2O', 'H2', 'CH4', 'N2', 'O2']
+    # tic = time.time()
+    # gri_model = mech_gri(initial_temperature, initial_pressure, equivalence_ratio)
+    # gri_states = gri_model.gri_combustion()
+    # toc = time.time()
+    # print("Compute time GRIMech3.0 : {0:.5f} [s]".format(toc-tic))
 
-    # 1S_CH4_MP1
-    tic = time.time()
-    model_1S_CH4_MP1 = mech_1S_CH4_MP1(initial_temperature, initial_pressure, equivalence_ratio)
-    mech_1S_CH4_MP1_states = model_1S_CH4_MP1.mech_1S_CH4_MP1_combustion()
-    toc = time.time()
-    print("Compute time 1S_CH4_MP1 : {0:.5f} [s]".format(toc-tic))
+    # # Compute the adiabatic flame temperature
+    # gri_species_concentration = np.zeros((len(gri_eval_species_name), eval_equivalence_ratio_adiabatic.shape[0]))
+    # gri_adiabatic_temp = np.zeros_like(eval_equivalence_ratio_adiabatic)
+    # for ii, iratio in enumerate(eval_equivalence_ratio_adiabatic):
+    #     gri_model = mech_gri(initial_temperature=initial_temperature, initial_pressure=initial_pressure, equivalence_ratio=iratio)
+    #     gri_adiabatic_temp[ii] = gri_model.compute_adiabatic_temperature()
+    #     gri_species_concentration[:, ii] = gri_model.compute_equilibrate_species_concentration(species_names=gri_eval_species_name)
+    # gri_species_dict = {}
+    # for ispecies in range(len(gri_eval_species_name)):
+    #     gri_species_dict[gri_eval_species_name[ispecies]] = gri_species_concentration[ispecies, :]
 
-    # 1S_CH4_Westbrook
+    # # Computing the ignition temerature 
+    gri_ignition_time = np.zeros((2, eval_auto_ignition_temp.shape[0]))
+    gri_ignition_time[0, :] = eval_auto_ignition_temp
     tic = time.time()
-    model_1S_CH4_Westbrook = mech_1S_CH4_Westbrook(initial_temperature, initial_pressure, equivalence_ratio)
-    mech_1S_CH4_Westbrook_states = model_1S_CH4_Westbrook.mech_1S_CH4_Westbrook_combustion()
-    toc = time.time()
-    print("Compute time 1S_CH4_Westbrook : {0:.5f} [s]".format(toc-tic))
+    for ii, itemp in enumerate(eval_auto_ignition_temp):
+        gri_model = mech_gri(initial_temperature=itemp, initial_pressure=initial_pressure, equivalence_ratio=1.0)
+        gri_ignition_time[1, ii] = gri_model.compute_ignition_time()
+    np.save("ignition_time_gri_mech_phi_{}_pressure_{}.npy".format(1.0, initial_pressure), gri_ignition_time)
+    print("Ignition time (GRI) : {}".format(time.time() - tic))
 
-    # 2S_CH4_Westbrook
+    # # 1S_CH4_MP1
+    # mech_1S_CH4_MP1_eval_species_name = ['CO2', 'H2O','CH4', 'N2', 'O2']
+    # tic = time.time()
+    # model_1S_CH4_MP1 = mech_1S_CH4_MP1(initial_temperature, initial_pressure, equivalence_ratio)
+    # mech_1S_CH4_MP1_states = model_1S_CH4_MP1.mech_1S_CH4_MP1_combustion()
+    # toc = time.time()
+    # print("Compute time 1S_CH4_MP1 : {0:.5f} [s]".format(toc-tic))
+    # mech_1S_CH4_MP1_species_concentration = np.zeros((len(mech_1S_CH4_MP1_eval_species_name), eval_equivalence_ratio_adiabatic.shape[0]))
+    # mech_1S_CH4_MP1_adiabatic_temp= np.zeros_like(eval_equivalence_ratio_adiabatic)
+    # for ii, iratio in enumerate(eval_equivalence_ratio_adiabatic):
+    #     model_1S_CH4_MP1 = mech_1S_CH4_MP1(initial_temperature=300, initial_pressure=100000, equivalence_ratio=iratio)
+    #     mech_1S_CH4_MP1_adiabatic_temp[ii] = model_1S_CH4_MP1.compute_adiabatic_temperature()
+    #     mech_1S_CH4_MP1_species_concentration[:, ii] = model_1S_CH4_MP1.compute_equilibrate_species_concentration(species_names=mech_1S_CH4_MP1_eval_species_name)
+    # mech_1S_CH4_MP1_species_dict = {}
+    # for ispecies in range(len(mech_1S_CH4_MP1_eval_species_name)):
+    #     mech_1S_CH4_MP1_species_dict[mech_1S_CH4_MP1_eval_species_name[ispecies]] = mech_1S_CH4_MP1_species_concentration[ispecies, :]
+
+
+    # # 1S_CH4_Westbrook
+    # mech_1S_CH4_Westbrook_eval_species_name = ['CO2', 'H2O','CH4', 'N2', 'O2']
+    # tic = time.time()
+    # model_1S_CH4_Westbrook = mech_1S_CH4_Westbrook(initial_temperature, initial_pressure, equivalence_ratio)
+    # mech_1S_CH4_Westbrook_states = model_1S_CH4_Westbrook.mech_1S_CH4_Westbrook_combustion()
+    # toc = time.time()
+    # print("Compute time 1S_CH4_Westbrook : {0:.5f} [s]".format(toc-tic))
+    # mech_1S_CH4_Westbrook_species_concentration = np.zeros((len(mech_1S_CH4_Westbrook_eval_species_name), eval_equivalence_ratio_adiabatic.shape[0]))
+    # mech_1S_CH4_Westbrook_adiabatic_temp= np.zeros_like(eval_equivalence_ratio_adiabatic)
+    # for ii, iratio in enumerate(eval_equivalence_ratio_adiabatic):
+    #     model_1S_CH4_Westbrook = mech_1S_CH4_Westbrook(initial_temperature=initial_temperature, initial_pressure=initial_pressure, equivalence_ratio=iratio)
+    #     mech_1S_CH4_Westbrook_adiabatic_temp[ii] = model_1S_CH4_Westbrook.compute_adiabatic_temperature()
+    #     mech_1S_CH4_Westbrook_species_concentration[:, ii] = model_1S_CH4_Westbrook.compute_equilibrate_species_concentration(species_names=mech_1S_CH4_Westbrook_eval_species_name)
+    # mech_1S_CH4_Westbrook_species_dict = {}
+    # for ispecies in range(len(mech_1S_CH4_Westbrook_eval_species_name)):
+    #     mech_1S_CH4_Westbrook_species_dict[mech_1S_CH4_Westbrook_eval_species_name[ispecies]] = mech_1S_CH4_Westbrook_species_concentration[ispecies, :]
+
+    # Computing the ignition temerature 
+    mech_1S_CH4_Westbrook_ignition_time = np.zeros((2, eval_auto_ignition_temp.shape[0]))
+    mech_1S_CH4_Westbrook_ignition_time[0, :] = eval_auto_ignition_temp
     tic = time.time()
-    model_2S_CH4_Westbrook = mech_2S_CH4_Westbrook(initial_temperature, initial_pressure, equivalence_ratio)
-    mech_2S_CH4_Westbrook_states = model_2S_CH4_Westbrook.mech_2S_CH4_Westbrook_combustion()
-    toc = time.time()
-    print("Compute time 2S_CH4_Westbrook : {0:.5f} [s]".format(toc-tic))
-   
-    if '--plot' in sys.argv:
+    for ii, itemp in enumerate(eval_auto_ignition_temp):
+        model_1S_CH4_Westbrook = mech_1S_CH4_Westbrook(initial_temperature=itemp, initial_pressure=initial_pressure, equivalence_ratio=1.0)
+        mech_1S_CH4_Westbrook_ignition_time[1, ii] = model_1S_CH4_Westbrook.compute_ignition_time()
+    np.save("ignition_time_1S_Westbrook_mech_phi_{}_pressure_{}.npy".format(1.0, initial_pressure), mech_1S_CH4_Westbrook_ignition_time)
+    print("Ignition time computation (1S Westbrook) : {}".format(time.time() - tic))
+
+    # # 2S_CH4_Westbrook
+    # mech_2S_CH4_Westbrook_eval_species_name = ['CO2', 'H2O','CH4', 'N2', 'O2', 'CO']
+    # tic = time.time()
+    # model_2S_CH4_Westbrook = mech_2S_CH4_Westbrook(initial_temperature, initial_pressure, equivalence_ratio)
+    # mech_2S_CH4_Westbrook_states = model_2S_CH4_Westbrook.mech_2S_CH4_Westbrook_combustion()
+    # toc = time.time()
+    # print("Compute time 2S_CH4_Westbrook : {0:.5f} [s]".format(toc-tic))
+    # mech_2S_CH4_Westbrook_species_concentration = np.zeros((len(mech_2S_CH4_Westbrook_eval_species_name), eval_equivalence_ratio_adiabatic.shape[0]))
+    # mech_2S_CH4_Westbrook_adiabatic_temp= np.zeros_like(eval_equivalence_ratio_adiabatic)
+    # for ii, iratio in enumerate(eval_equivalence_ratio_adiabatic):
+    #     model_2S_CH4_Westbrook = mech_2S_CH4_Westbrook(initial_temperature=initial_temperature, initial_pressure=initial_pressure, equivalence_ratio=iratio)
+    #     mech_2S_CH4_Westbrook_adiabatic_temp[ii] = model_2S_CH4_Westbrook.compute_adiabatic_temperature()
+    #     mech_2S_CH4_Westbrook_species_concentration[:, ii] = model_2S_CH4_Westbrook.compute_equilibrate_species_concentration(species_names=mech_2S_CH4_Westbrook_eval_species_name)
+
+    # mech_2S_CH4_Westbrook_species_dict = {}
+    # for ispecies in range(len(mech_2S_CH4_Westbrook_eval_species_name)):
+    #     mech_2S_CH4_Westbrook_species_dict[mech_2S_CH4_Westbrook_eval_species_name[ispecies]] = mech_2S_CH4_Westbrook_species_concentration[ispecies, :]
+
+    mech_2S_CH4_Westbrook_ignition_time = np.zeros((2, eval_auto_ignition_temp.shape[0]))
+    mech_2S_CH4_Westbrook_ignition_time[0, :] = eval_auto_ignition_temp
+    tic = time.time()
+    for ii, itemp in enumerate(eval_auto_ignition_temp):
+        model_2S_CH4_Westbrook = mech_2S_CH4_Westbrook(initial_temperature=itemp, initial_pressure=initial_pressure, equivalence_ratio=1.0)
+        mech_2S_CH4_Westbrook_ignition_time[1, ii] = model_2S_CH4_Westbrook.compute_ignition_time()
+    np.save("ignition_time_2S_Westbrook_mech_phi_{}_pressure_{}.npy".format(1.0, initial_pressure), mech_2S_CH4_Westbrook_ignition_time)
+    print("Ignition time computation (2S Westbrook) : {}".format(time.time() - tic))
+
+    if '--ignitionplot' in sys.argv:
+        fig, axs = plt.subplots(figsize=(10, 6))
+        axs.scatter(1000/eval_auto_ignition_temp, mech_1S_CH4_Westbrook_ignition_time[1, :], label=r"1-step mechanism [Westbrook \textit{et al.}]", color="r", marker="^", s=60)
+        axs.scatter(1000/eval_auto_ignition_temp, mech_2S_CH4_Westbrook_ignition_time[1, :], label=r"2-step mechanism [Westbrook \textit{el al.}]", color="b", marker="D", s=60)
+        axs.scatter(1000/eval_auto_ignition_temp, gri_ignition_time[1, :], label="Gri-Mech 3.0", color="k", marker="s", s=60)
+        axs.set_xlabel(r"1000/T [1/K]")
+        axs.set_ylabel(r"$t_{ign}$ [s]")
+        axs.legend(loc="upper left")
+        axs.set_yscale("log")
+        axs.grid(color="k", alpha=0.5)
+        plt.tight_layout()
+        plt.savefig("ignition_time_phi_{}_pressure_{}.png".format(1.0, initial_pressure))
+        plt.close()
+
+    if '--equilibrateplot' in sys.argv:
         fig, axs = plt.subplots(2, 2, figsize=(18, 10))
         fig.tight_layout(h_pad=5, w_pad=5)
-        axs[0, 0].plot(gri_states.t, gri_states.T, color="k", label="Gri-Mech3.0")
-        axs[0, 0].plot(mech_1S_CH4_MP1_states.t, mech_1S_CH4_MP1_states.T, color="r", label="1S_CH4_MP1")
-        axs[0, 0].plot(mech_1S_CH4_Westbrook_states.t, mech_1S_CH4_Westbrook_states.T, color="g", label="1S_CH4_Westbrook")
-        axs[0, 0].plot(mech_2S_CH4_Westbrook_states.t, mech_2S_CH4_Westbrook_states.T, color="b", label="2S_CH4_Westbrook")
+        axs[0, 0].plot(eval_equivalence_ratio_adiabatic, mech_1S_CH4_Westbrook_adiabatic_temp, color="r",  label=r"1-step mechanism [Westbrook $\textit{et al.}$]")
+        axs[0, 0].plot(eval_equivalence_ratio_adiabatic, mech_2S_CH4_Westbrook_adiabatic_temp, color="b",  label=r"2-step mechanism [Westbrook $\textit{et al.}$]")
+        axs[0, 0].plot(eval_equivalence_ratio_adiabatic, gri_adiabatic_temp, color="k", label="Gri-Mech 3.0")
+        axs[0, 0].set_xlabel(r"Equivalence ratio, $\phi$")
+        axs[0, 0].set_ylabel(r"Adiabatic temperature [K]")
+        axs[0, 0].set_ylim([1400, 2400])
+        axs[0, 0].set_xlim([0.5, 1.5])
+        axs[0, 0].tick_params(pad=10)
+        # axs[0, 0].legend(loc="lower right")
+        axs[0, 0].xaxis.set_major_locator(MultipleLocator(0.5))
+        axs[0, 0].xaxis.set_minor_locator(MultipleLocator(0.25))
+        axs[0, 0].yaxis.set_major_locator(MultipleLocator(200))
+        axs[0, 0].grid(which="major", color="k", alpha=0.5)
+        axs[0, 0].grid(which="minor", color="grey", alpha=0.3)
+
+        axs[0, 1].plot(eval_equivalence_ratio_adiabatic, mech_1S_CH4_Westbrook_species_dict['CH4'], color="r", label=r"1-step mechanism [Westbrook $\textit{et al.}$]")
+        axs[0, 1].plot(eval_equivalence_ratio_adiabatic, mech_2S_CH4_Westbrook_species_dict['CH4'], color="b", label=r"2-step mechanism [Westbrook $\textit{et al.}$]")
+        axs[0, 1].plot(eval_equivalence_ratio_adiabatic, gri_species_dict['CH4'], color="k", label="Gri-Mech 3.0")
+        axs[0, 1].set_xlim([0.5, 1.5])
+        axs[0, 1].set_yscale("log")
+        axs[0, 1].xaxis.set_major_locator(MultipleLocator(0.5))
+        axs[0, 1].xaxis.set_minor_locator(MultipleLocator(0.25))
+        axs[0, 1].grid(which="major", color="k", alpha=0.5)
+        axs[0, 1].grid(which="minor", color="grey", alpha=0.3)
+        axs[0, 1].set_xlabel(r"Equivalence ratio, $\phi$")
+        axs[0, 1].set_ylabel(r"$[\textrm{CH}_{4}]$")
+        # axs[0, 1].legend(loc="lower right")
+        
+        axs[1, 0].plot(eval_equivalence_ratio_adiabatic, mech_1S_CH4_Westbrook_species_dict['CO2'], color="r", label=r"1-step mechanism [Westbrook $\textit{et al.}$]")
+        axs[1, 0].plot(eval_equivalence_ratio_adiabatic, mech_2S_CH4_Westbrook_species_dict['CO2'], color="b", label=r"2-step mechanism [Westbrook $\textit{et al.}$]")
+        axs[1, 0].plot(eval_equivalence_ratio_adiabatic, gri_species_dict['CO2'], color="k", label="Gri-Mech 3.0")
+        axs[1, 0].set_xlim([0.5, 1.5])
+        axs[1, 0].set_ylim([0, 0.1])
+        axs[1, 0].xaxis.set_major_locator(MultipleLocator(0.5))
+        axs[1, 0].xaxis.set_minor_locator(MultipleLocator(0.25))
+        axs[1, 0].yaxis.set_minor_locator(MultipleLocator(0.025))
+        axs[1, 0].grid(which="major", color="k", alpha=0.5)
+        axs[1, 0].grid(which="minor", color="grey", alpha=0.3)
+        axs[1, 0].set_xlabel(r"Equivalence ratio, $\phi$")
+        axs[1, 0].set_ylabel(r"$[\textrm{CO}_{2}]$")
+        # axs[1, 0].legend(loc="lower right")
+        
+        # axs[1, 1].plot(eval_equivalence_ratio_adiabatic, mech_1S_CH4_Westbrook_species_dict['CO'], color="r", label=r"1-step mechanism [Westbrook $\textit{et al.}$]")
+        axs[1, 1].plot(eval_equivalence_ratio_adiabatic, mech_2S_CH4_Westbrook_species_dict['CO'], color="b", label=r"2-step mechanism [Westbrook $\textit{et al.}$]")
+        axs[1, 1].plot(eval_equivalence_ratio_adiabatic, gri_species_dict['CO'], color="k", label="Gri-Mech 3.0")
+        axs[1, 1].set_xlim([0.5, 1.5])
+        axs[1, 1].set_ylim([0, 0.15])
+        axs[1, 1].xaxis.set_major_locator(MultipleLocator(0.5))
+        axs[1, 1].xaxis.set_minor_locator(MultipleLocator(0.25))
+        axs[1, 1].yaxis.set_minor_locator(MultipleLocator(0.025))
+        axs[1, 1].grid(which="major", color="k", alpha=0.5)
+        axs[1, 1].grid(which="minor", color="grey", alpha=0.3)
+        axs[1, 1].set_xlabel(r"Equivalence ratio, $\phi$")
+        axs[1, 1].set_ylabel(r"$[\textrm{CO}]$")
+        # axs[1, 1].legend(loc="lower right")
+
+
+        handles, labels = axs[0, 0].get_legend_handles_labels()
+        fig.legend(handles, labels, bbox_to_anchor=(0.34, 0.5, 0.5, 0.5), ncol=3)
+
+        plt.subplots_adjust(top=0.9, bottom=0.15, left=0.1)
+        plt.savefig("equilibrate_initial_temp_{}_pressure_{}.png".format(initial_temperature, initial_pressure))
+        plt.close()
+
+    if '--transientplot' in sys.argv:
+        fig, axs = plt.subplots(2, 2, figsize=(18, 10))
+        fig.tight_layout(h_pad=5, w_pad=5)
+        axs[0, 0].plot(gri_states.t*1000, gri_states.T, color="k", label="Gri-Mech3.0")
+        axs[0, 0].plot(mech_1S_CH4_MP1_states.t*1000, mech_1S_CH4_MP1_states.T, color="r", label="1S_CH4_MP1")
+        axs[0, 0].plot(mech_1S_CH4_Westbrook_states.t*1000, mech_1S_CH4_Westbrook_states.T, color="g", label="1S_CH4_Westbrook")
+        axs[0, 0].plot(mech_2S_CH4_Westbrook_states.t*1000, mech_2S_CH4_Westbrook_states.T, color="b", label="2S_CH4_Westbrook")
         axs[0, 0].set_ylim([1400, 3500])
-        axs[0, 0].set_xlim([0.0000007, 0.003])
-        axs[0, 0].set_xlabel("time [s]")
+        # axs[0, 0].set_xlim([0.0000007, 0.003])
+        axs[0, 0].set_xlabel("time [ms]")
         axs[0, 0].set_ylabel("Temperature [K]")
-        axs[0, 0].set_xscale("log")
+        # axs[0, 0].set_xscale("log")
+        axs[0, 0].xaxis.set_major_locator(MultipleLocator(1))
+        axs[0, 0].xaxis.set_minor_locator(MultipleLocator(0.5))
         axs[0, 0].grid()
 
-        axs[0, 1].plot(gri_states.t, gri_states('CH4').X, color="k", label="Gri-Mech3.0")
-        axs[0, 1].plot(mech_1S_CH4_MP1_states.t, mech_1S_CH4_MP1_states('CH4').X, color="r", label="1S_CH4_MP1")
-        axs[0, 1].plot(mech_1S_CH4_Westbrook_states.t, mech_1S_CH4_Westbrook_states('CH4').X, color="g", label="1S_CH4_Westbrook")
-        axs[0, 1].plot(mech_2S_CH4_Westbrook_states.t, mech_2S_CH4_Westbrook_states('CH4').X, color="b", label="2S_CH4_Westbrook")
+        axs[0, 1].plot(gri_states.t*1000, gri_states('CH4').X, color="k", label="Gri-Mech3.0")
+        axs[0, 1].plot(mech_1S_CH4_MP1_states.t*1000, mech_1S_CH4_MP1_states('CH4').X, color="r", label="1S_CH4_MP1")
+        axs[0, 1].plot(mech_1S_CH4_Westbrook_states.t*1000, mech_1S_CH4_Westbrook_states('CH4').X, color="g", label="1S_CH4_Westbrook")
+        axs[0, 1].plot(mech_2S_CH4_Westbrook_states.t*1000, mech_2S_CH4_Westbrook_states('CH4').X, color="b", label="2S_CH4_Westbrook")
         axs[0, 1].set_ylim([0, 0.1])
-        axs[0, 1].set_xlim([0.0000007, 0.003])
-        axs[0, 1].set_xlabel("time [s]")
+        # axs[0, 1].set_xlim([0.0000007, 0.003])
+        axs[0, 1].set_xlabel("time [ms]")
         axs[0, 1].set_ylabel("[$CH_{4}$]")
-        axs[0, 1].set_xscale("log")
+        axs[0, 1].xaxis.set_major_locator(MultipleLocator(1))
+        axs[0, 1].xaxis.set_minor_locator(MultipleLocator(0.5))
+        # axs[0, 1].set_xscale("log")
         axs[0, 1].grid()
 
-        axs[1, 0].plot(gri_states.t, gri_states('O2').X, color="k", label="Gri-Mech3.0")
-        axs[1, 0].plot(mech_1S_CH4_MP1_states.t, mech_1S_CH4_MP1_states('O2').X, color="r", label="1S_CH4_MP1")
-        axs[1, 0].plot(mech_1S_CH4_Westbrook_states.t, mech_1S_CH4_Westbrook_states('O2').X, color="g", label="1S_CH4_Westbrook")
-        axs[1, 0].plot(mech_2S_CH4_Westbrook_states.t, mech_2S_CH4_Westbrook_states('O2').X, color="b", label="2S_CH4_Westbrook")
+        axs[1, 0].plot(gri_states.t*1000, gri_states('O2').X, color="k", label="Gri-Mech3.0")
+        axs[1, 0].plot(mech_1S_CH4_MP1_states.t*1000, mech_1S_CH4_MP1_states('O2').X, color="r", label="1S_CH4_MP1")
+        axs[1, 0].plot(mech_1S_CH4_Westbrook_states.t*1000, mech_1S_CH4_Westbrook_states('O2').X, color="g", label="1S_CH4_Westbrook")
+        axs[1, 0].plot(mech_2S_CH4_Westbrook_states.t*1000, mech_2S_CH4_Westbrook_states('O2').X, color="b", label="2S_CH4_Westbrook")
         axs[1, 0].set_ylim([0, 0.2])
-        axs[1, 0].set_xlim([0.0000007, 0.003])
-        axs[1, 0].set_xlabel("time [s]")
+        # axs[1, 0].set_xlim([0.0000007, 0.003])
+        axs[1, 0].set_xlabel("time [ms]")
         axs[1, 0].set_ylabel("[$O_{2}$]")
-        axs[1, 0].set_xscale("log")
+        # axs[1, 0].set_xscale("log")
+        axs[1, 0].xaxis.set_major_locator(MultipleLocator(1))
+        axs[1, 0].xaxis.set_minor_locator(MultipleLocator(0.5))
         axs[1, 0].grid()
 
-        axs[1, 1].plot(gri_states.t, gri_states('CO2').X, color="k", label="Gri-Mech3.0")
-        axs[1, 1].plot(mech_1S_CH4_MP1_states.t, mech_1S_CH4_MP1_states('CO2').X, color="r", label="1S_CH4_MP1")
-        axs[1, 1].plot(mech_1S_CH4_Westbrook_states.t, mech_1S_CH4_Westbrook_states('CO2').X, color="g", label="1S_CH4_Westbrook")
-        axs[1, 1].plot(mech_2S_CH4_Westbrook_states.t, mech_2S_CH4_Westbrook_states('CO2').X, color="b", label="2S_CH4_Westbrook")
+        axs[1, 1].plot(gri_states.t*1000, gri_states('CO2').X, color="k", label="Gri-Mech3.0")
+        axs[1, 1].plot(mech_1S_CH4_MP1_states.t*1000, mech_1S_CH4_MP1_states('CO2').X, color="r", label="1S_CH4_MP1")
+        axs[1, 1].plot(mech_1S_CH4_Westbrook_states.t*1000, mech_1S_CH4_Westbrook_states('CO2').X, color="g", label="1S_CH4_Westbrook")
+        axs[1, 1].plot(mech_2S_CH4_Westbrook_states.t*1000, mech_2S_CH4_Westbrook_states('CO2').X, color="b", label="2S_CH4_Westbrook")
         axs[1, 1].set_ylim([0, 0.1])
-        axs[1, 1].set_xlim([0.0000007, 0.003])
-        axs[1, 1].set_xlabel("time [s]")
+        # axs[1, 1].set_xlim([0.0000007, 0.003])
+        axs[1, 1].set_xlabel("time [ms]")
         axs[1, 1].set_ylabel("[$CO_{2}$]")
-        axs[1, 1].set_xscale("log")
+        # axs[1, 1].set_xscale("log")
+        axs[1, 1].xaxis.set_major_locator(MultipleLocator(1))
+        axs[1, 1].xaxis.set_minor_locator(MultipleLocator(0.5))
         axs[1, 1].grid()
 
         handles, labels = axs[0, 0].get_legend_handles_labels()
@@ -632,7 +968,6 @@ def main():
         plt.subplots_adjust(top=0.9, bottom=0.15, left=0.15)
         plt.savefig("methane_combustion_t_{}_p_{}.png".format(initial_temperature, initial_pressure))
         plt.close()
-    
 
 if __name__ == ("__main__"):
     main()
