@@ -251,7 +251,7 @@ class mech_gri():
         gas.TP = self.initial_temperature, self.initial_pressure
         gas.set_equivalence_ratio(self.equivalence_ratio, "CH4", "O2:1, N2:3.76")
         dt = 1e-6
-        t_end = 2000*1e-3
+        t_end = 3000*1e-3
         reactor = ct.IdealGasConstPressureReactor(gas)
         sim = ct.ReactorNet([reactor])
         states = ct.SolutionArray(gas, extra=['t'])
@@ -259,8 +259,11 @@ class mech_gri():
         sim.rtol = 1e-6
 
         while sim.time < t_end:
-            sim.step()
-            states.append(reactor.thermo.state, t=sim.time)
+            try:
+                sim.step()
+                states.append(reactor.thermo.state, t=sim.time)
+            except:
+                sim.atol = sim.atol*10
 
         ignition_time, ignition_temperature = compute_ignition_stats(temperature=states.T, time=states.t)
 
@@ -679,17 +682,18 @@ class mech_2S_CH4_Westbrook():
         gas.TP = self.initial_temperature, self.initial_pressure
         gas.set_equivalence_ratio(self.equivalence_ratio, "CH4", "O2:1, N2:3.76")
         dt = 1e-6
-        t_end = 2000*1e-3
+        t_end = 3000*1e-3
         reactor = ct.IdealGasConstPressureReactor(gas)
         sim = ct.ReactorNet([reactor])
         states = ct.SolutionArray(gas, extra=['t'])
-        sim.atol = 1e-15
-        sim.rtol = 1e-6
+        sim.rtol = 1e-8
 
         while sim.time < t_end:
-            sim.step()
-            states.append(reactor.thermo.state, t=sim.time)
-
+            try:
+                sim.step()
+                states.append(reactor.thermo.state, t=sim.time)
+            except:
+                sim.atol = sim.atol*10
         ignition_time, ignition_temperature = compute_ignition_stats(temperature=states.T, time=states.t)
 
         return ignition_time
@@ -746,14 +750,16 @@ def main():
     #     gri_species_dict[gri_eval_species_name[ispecies]] = gri_species_concentration[ispecies, :]
 
     # # Computing the ignition temerature 
-    gri_ignition_time = np.zeros((2, eval_auto_ignition_temp.shape[0]))
-    gri_ignition_time[0, :] = eval_auto_ignition_temp
-    tic = time.time()
-    for ii, itemp in enumerate(eval_auto_ignition_temp):
-        gri_model = mech_gri(initial_temperature=itemp, initial_pressure=initial_pressure, equivalence_ratio=1.0)
-        gri_ignition_time[1, ii] = gri_model.compute_ignition_time()
-    np.save("ignition_time_gri_mech_phi_{}_pressure_{}.npy".format(1.0, initial_pressure), gri_ignition_time)
-    print("Ignition time (GRI) : {}".format(time.time() - tic))
+    # gri_ignition_time = np.zeros((4, eval_auto_ignition_temp.shape[0]))
+    # gri_ignition_time[0, :] = eval_auto_ignition_temp
+    # gri_ignition_time[1, :] = initial_pressure
+    # gri_ignition_time[2, :] = np.ones(eval_auto_ignition_temp.shape[0])
+    # tic = time.time()
+    # for ii, itemp in enumerate(eval_auto_ignition_temp):
+    #     gri_model = mech_gri(initial_temperature=itemp, initial_pressure=initial_pressure, equivalence_ratio=1.0)
+    #     gri_ignition_time[3, ii] = gri_model.compute_ignition_time()
+    # np.savetxt("./data/ignition_time/ignition_time_gri_mech.dat", gri_ignition_time.T, delimiter=' ', header = "Vartiables: Inital_temperature, Initial_pressure, Equivalence_ratio, Ignition_temperature")
+    # print("Ignition time (GRI) : {}".format(time.time() - tic))
 
     # # 1S_CH4_MP1
     # mech_1S_CH4_MP1_eval_species_name = ['CO2', 'H2O','CH4', 'N2', 'O2']
@@ -790,15 +796,17 @@ def main():
     # for ispecies in range(len(mech_1S_CH4_Westbrook_eval_species_name)):
     #     mech_1S_CH4_Westbrook_species_dict[mech_1S_CH4_Westbrook_eval_species_name[ispecies]] = mech_1S_CH4_Westbrook_species_concentration[ispecies, :]
 
-    # Computing the ignition temerature 
-    mech_1S_CH4_Westbrook_ignition_time = np.zeros((2, eval_auto_ignition_temp.shape[0]))
-    mech_1S_CH4_Westbrook_ignition_time[0, :] = eval_auto_ignition_temp
-    tic = time.time()
-    for ii, itemp in enumerate(eval_auto_ignition_temp):
-        model_1S_CH4_Westbrook = mech_1S_CH4_Westbrook(initial_temperature=itemp, initial_pressure=initial_pressure, equivalence_ratio=1.0)
-        mech_1S_CH4_Westbrook_ignition_time[1, ii] = model_1S_CH4_Westbrook.compute_ignition_time()
-    np.save("ignition_time_1S_Westbrook_mech_phi_{}_pressure_{}.npy".format(1.0, initial_pressure), mech_1S_CH4_Westbrook_ignition_time)
-    print("Ignition time computation (1S Westbrook) : {}".format(time.time() - tic))
+    # # Computing the ignition temerature 
+    # mech_1S_CH4_Westbrook_ignition_time = np.zeros((4, eval_auto_ignition_temp.shape[0]))
+    # mech_1S_CH4_Westbrook_ignition_time[0, :] = eval_auto_ignition_temp
+    # mech_1S_CH4_Westbrook_ignition_time[1, :] = initial_pressure
+    # mech_1S_CH4_Westbrook_ignition_time[2, :] = np.ones(eval_auto_ignition_temp.shape[0])
+    # tic = time.time()
+    # for ii, itemp in enumerate(eval_auto_ignition_temp):
+    #     model_1S_CH4_Westbrook = mech_1S_CH4_Westbrook(initial_temperature=itemp, initial_pressure=initial_pressure, equivalence_ratio=1.0)
+    #     mech_1S_CH4_Westbrook_ignition_time[3, ii] = model_1S_CH4_Westbrook.compute_ignition_time()
+    # np.savetxt("./data/ignition_time/ignition_time_1S_CH4_Westbrook_mech.dat", mech_1S_CH4_Westbrook_ignition_time.T, delimiter=' ', header = "Vartiables: Inital_temperature, Initial_pressure, Equivalence_ratio, Ignition_temperature")
+    # print("Ignition time computation (1S Westbrook) : {}".format(time.time() - tic))
 
     # # 2S_CH4_Westbrook
     # mech_2S_CH4_Westbrook_eval_species_name = ['CO2', 'H2O','CH4', 'N2', 'O2', 'CO']
@@ -818,13 +826,17 @@ def main():
     # for ispecies in range(len(mech_2S_CH4_Westbrook_eval_species_name)):
     #     mech_2S_CH4_Westbrook_species_dict[mech_2S_CH4_Westbrook_eval_species_name[ispecies]] = mech_2S_CH4_Westbrook_species_concentration[ispecies, :]
 
-    mech_2S_CH4_Westbrook_ignition_time = np.zeros((2, eval_auto_ignition_temp.shape[0]))
+    mech_2S_CH4_Westbrook_ignition_time = np.zeros((4, eval_auto_ignition_temp.shape[0]))
     mech_2S_CH4_Westbrook_ignition_time[0, :] = eval_auto_ignition_temp
+    mech_2S_CH4_Westbrook_ignition_time[1, :] = initial_pressure
+    mech_2S_CH4_Westbrook_ignition_time[2, :] = np.ones(eval_auto_ignition_temp.shape[0])
+
     tic = time.time()
     for ii, itemp in enumerate(eval_auto_ignition_temp):
         model_2S_CH4_Westbrook = mech_2S_CH4_Westbrook(initial_temperature=itemp, initial_pressure=initial_pressure, equivalence_ratio=1.0)
-        mech_2S_CH4_Westbrook_ignition_time[1, ii] = model_2S_CH4_Westbrook.compute_ignition_time()
-    np.save("ignition_time_2S_Westbrook_mech_phi_{}_pressure_{}.npy".format(1.0, initial_pressure), mech_2S_CH4_Westbrook_ignition_time)
+        mech_2S_CH4_Westbrook_ignition_time[3, ii] = model_2S_CH4_Westbrook.compute_ignition_time()
+    print(mech_2S_CH4_Westbrook_ignition_time)
+    np.savetxt("./data/ignition_time/ignition_time_2S_CH4_Westbrook_mech.dat", mech_2S_CH4_Westbrook_ignition_time.T, delimiter=' ', header = "Vartiables: Inital_temperature, Initial_pressure, Equivalence_ratio, Ignition_temperature")
     print("Ignition time computation (2S Westbrook) : {}".format(time.time() - tic))
 
     if '--ignitionplot' in sys.argv:
