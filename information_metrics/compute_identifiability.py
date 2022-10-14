@@ -433,6 +433,7 @@ class mutual_information():
 
     def save_quantity(self, file_name, data):
         """Function saves the data"""
+        file_name = os.path.join(self.save_path, file_name)
         if rank == 0:
             np.save(os.path.join(self.save_path, file_name), data)
         else:
@@ -509,6 +510,7 @@ class mutual_information():
 
     def remove_file(self, file_name):
         """Function deletes a file"""
+        file_name = os.path.join(self.save_path, file_name)
         if rank == 0:
             if os.path.exists(file_name):
                 os.remove(file_name)
