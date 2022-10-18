@@ -251,7 +251,7 @@ class mech_gri():
         gas.TP = self.initial_temperature, self.initial_pressure
         gas.set_equivalence_ratio(self.equivalence_ratio, "CH4", "O2:1, N2:3.76")
         dt = 1e-6
-        t_end = 3000*1e-3
+        t_end = 1e+5
         reactor = ct.IdealGasConstPressureReactor(gas)
         sim = ct.ReactorNet([reactor])
         states = ct.SolutionArray(gas, extra=['t'])
@@ -682,7 +682,7 @@ class mech_2S_CH4_Westbrook():
         gas.TP = self.initial_temperature, self.initial_pressure
         gas.set_equivalence_ratio(self.equivalence_ratio, "CH4", "O2:1, N2:3.76")
         dt = 1e-6
-        t_end = 3000*1e-3
+        t_end = 1e+5
         reactor = ct.IdealGasConstPressureReactor(gas)
         sim = ct.ReactorNet([reactor])
         states = ct.SolutionArray(gas, extra=['t'])
@@ -726,7 +726,7 @@ def main():
     initial_pressure = 100000 # Pa
     equivalence_ratio = 1.0 # For transient cases
     eval_equivalence_ratio_adiabatic = np.linspace(0.5, 1.5, 100) # For equilibrium studies
-    eval_auto_ignition_temp = np.linspace(1000, 2000, 5)
+    eval_auto_ignition_temp = np.linspace(800, 2000, 5)
     # eval_auto_ignition_temp = np.array([2500])
     # End user input
 
@@ -750,16 +750,16 @@ def main():
     #     gri_species_dict[gri_eval_species_name[ispecies]] = gri_species_concentration[ispecies, :]
 
     # # Computing the ignition temerature 
-    # gri_ignition_time = np.zeros((4, eval_auto_ignition_temp.shape[0]))
-    # gri_ignition_time[0, :] = eval_auto_ignition_temp
-    # gri_ignition_time[1, :] = initial_pressure
-    # gri_ignition_time[2, :] = np.ones(eval_auto_ignition_temp.shape[0])
-    # tic = time.time()
-    # for ii, itemp in enumerate(eval_auto_ignition_temp):
-    #     gri_model = mech_gri(initial_temperature=itemp, initial_pressure=initial_pressure, equivalence_ratio=1.0)
-    #     gri_ignition_time[3, ii] = gri_model.compute_ignition_time()
-    # np.savetxt("./data/ignition_time/ignition_time_gri_mech.dat", gri_ignition_time.T, delimiter=' ', header = "Vartiables: Inital_temperature, Initial_pressure, Equivalence_ratio, Ignition_temperature")
-    # print("Ignition time (GRI) : {}".format(time.time() - tic))
+    gri_ignition_time = np.zeros((4, eval_auto_ignition_temp.shape[0]))
+    gri_ignition_time[0, :] = eval_auto_ignition_temp
+    gri_ignition_time[1, :] = initial_pressure
+    gri_ignition_time[2, :] = np.ones(eval_auto_ignition_temp.shape[0])
+    tic = time.time()
+    for ii, itemp in enumerate(eval_auto_ignition_temp):
+        gri_model = mech_gri(initial_temperature=itemp, initial_pressure=initial_pressure, equivalence_ratio=1.0)
+        gri_ignition_time[3, ii] = gri_model.compute_ignition_time()
+    np.savetxt("./data/ignition_time/ignition_time_gri_mech.dat", gri_ignition_time.T, delimiter=' ', header = "Vartiables: Inital_temperature, Initial_pressure, Equivalence_ratio, Ignition_temperature")
+    print("Ignition time (GRI) : {}".format(time.time() - tic))
 
     # # 1S_CH4_MP1
     # mech_1S_CH4_MP1_eval_species_name = ['CO2', 'H2O','CH4', 'N2', 'O2']
