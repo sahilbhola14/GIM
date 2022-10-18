@@ -1,5 +1,5 @@
 # Campaign
-campaign_id: 8
+campaign_id: 9
 
 # Forward model parameters
 
@@ -12,11 +12,11 @@ objective_scaling: 1.0e-12
 
 # Leaning model 
 compute_map: False
-compute_mle: False
+compute_mle: True
 
 # Identifiability
 compute_identifiability: True
 global_num_outer_samples: 10
-global_num_inner_samples: 1000
+global_num_inner_samples: 5
 restart_identifiability: False
 
