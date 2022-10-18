@@ -78,7 +78,6 @@ class learn_ignition_model():
     def compute_model_prediction(self, theta):
         """Function computes the model prediction, Temperature"""
         prediction = np.zeros((self.num_data_points, self.spatial_resolution))
-
         for idata_sample in range(self.num_data_points):
             initial_pressure = self.initial_pressure[idata_sample]
             initial_temperature = self.initial_temperature[idata_sample]
@@ -99,7 +98,6 @@ class learn_ignition_model():
                     )
             ignition_temperature = combustion_model.compute_ignition_time()
             prediction[idata_sample, :] = np.log(ignition_temperature) 
-
         return prediction
 
     def compute_complete_state(self, theta):
@@ -351,6 +349,12 @@ class learn_ignition_model():
         estimator.compute_individual_parameter_data_mutual_information_via_mc(
                 use_quadrature=True,
                 single_integral_gaussian_quad_pts=50
+                )
+
+        estimator.compute_posterior_pair_parameter_mutual_information(
+                use_quadrature=True,
+                single_integral_gaussian_quad_pts=60,
+                double_integral_gaussian_quad_pts=60
                 )
 
 def load_configuration_file(config_file_path="./config.yaml"):
