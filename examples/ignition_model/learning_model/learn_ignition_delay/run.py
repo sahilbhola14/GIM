@@ -41,7 +41,7 @@ class learn_ignition_model():
         self.model_noise_cov = config_data["model_noise_cov"]
 
         # Traning data
-        training_data_set = np.load("training_data.npy")
+        training_data_set = np.load(os.path.join(self.campaign_path, "training_data.npy"))
         self.initial_temperature = training_data_set[:, 0]
         self.initial_pressure = training_data_set[:, 1]
         self.equivalence_ratio = training_data_set[:, 2]
@@ -60,7 +60,6 @@ class learn_ignition_model():
             self.log_file = open(log_file_path, "w")
         else:
             self.log_file = None
-
 
     def compute_Arrehenius_A(self, theta, equivalence_ratio, initial_temperature):
         """Function computes the pre exponential factor, A for the Arrhenius rate"""
