@@ -697,6 +697,8 @@ class mech_2S_CH4_Westbrook():
             except:
                 sim.atol = sim.atol*10
                 simulation_success = False
+                if sim.atol > 1e-1:
+                    break
         if simulation_success:
             ignition_time, ignition_temperature = compute_ignition_stats(temperature=states.T, time=states.t)
         else:
