@@ -687,14 +687,20 @@ class mech_2S_CH4_Westbrook():
         sim = ct.ReactorNet([reactor])
         states = ct.SolutionArray(gas, extra=['t'])
         sim.rtol = 1e-8
+        simulation_success = False
 
         while sim.time < t_end:
             try:
                 sim.step()
                 states.append(reactor.thermo.state, t=sim.time)
+                simulation_success = True
             except:
                 sim.atol = sim.atol*10
-        ignition_time, ignition_temperature = compute_ignition_stats(temperature=states.T, time=states.t)
+                simulation_success = False
+        if simulation_success:
+            ignition_time, ignition_temperature = compute_ignition_stats(temperature=states.T, time=states.t)
+        else:
+            ignition_time = t_end
 
         return ignition_time
 
