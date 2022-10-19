@@ -35,7 +35,8 @@ training_data = np.copy(no_noise_data)
 # Adding noise
 noise = np.sqrt(model_noise_cov)*np.random.randn(num_data_points)
 training_data[:, -1] = np.log(training_data[:, -1]) + noise
-np.save("training_data.npy", training_data)
+data_save_path = os.path.join("./campaign_results", "campaign_{0:d}/training_data.npy".format(campaign_id))
+np.save(data_save_path, training_data)
 
 fig_save_path = os.path.join("./campaign_results", "campaign_{0:d}/Figures/training_data.png".format(campaign_id))
 plt.figure(figsize=(8, 5))
