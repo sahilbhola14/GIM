@@ -1026,103 +1026,103 @@ class conditional_mutual_information(mutual_information):
                 return integrand_val
 
             if quadrature_rule == "unscented":
-                unscented_quad = unscented_quadrature(
-                    mean=sample_parameter_mean,
-                    cov=sample_parameter_cov,
-                    integrand=integrand
-                )
+                # unscented_quad = unscented_quadrature(
+                #     mean=sample_parameter_mean,
+                #     cov=sample_parameter_cov,
+                #     integrand=integrand
+                # )
 
-                individual_likelihood_mean, individual_likelihood_cov = unscented_quad.compute_integeral()
+                # individual_likelihood_mean, individual_likelihood_cov = unscented_quad.compute_integeral()
 
-                individual_likelihood_prob[isample] = individual_likelihood_mean + \
-                    np.sqrt(individual_likelihood_cov)*np.random.randn(1)
+                # individual_likelihood_prob[isample] = individual_likelihood_mean + \
+                #     np.sqrt(individual_likelihood_cov)*np.random.randn(1)
 
-                if individual_likelihood_prob[isample] == 0:
-                   # Use importance sampling
-                     for _, ifactor in enumerate(importance_sampling_cov_factors):
+                # if individual_likelihood_prob[isample] == 0:
 
-                        cov_multiplication_factor = ifactor*np.eye(sample_parameter_mean.shape[0])
+                # Use importance sampling
+                for _, ifactor in enumerate(importance_sampling_cov_factors):
 
-
-                        unscented_quad = unscented_quadrature(
-                            mean=self.get_sample_centered_mean(sample_parameter_extracted_sample=self.local_outer_prior_samples[sample_parameter_idx, isample]),
-                            cov=sample_parameter_cov*cov_multiplication_factor,
-                            integrand=integrand
-                        )
-
-                        def proposal_density_estimator(eval_points):
-                                                        probability = self.compute_gaussian_prob(
-                                                            mean=self.get_sample_centered_mean(sample_parameter_extracted_sample=self.local_outer_prior_samples[sample_parameter_idx, isample]),
-                                                            cov=sample_parameter_cov*cov_multiplication_factor,
-                                                            samples=eval_points
-                                                        )
-                                                        return probability
+                    cov_multiplication_factor = ifactor*np.eye(sample_parameter_mean.shape[0])
 
 
-                        quadrature_points = unscented_quad.compute_quadrature_points()
+                    unscented_quad = unscented_quadrature(
+                        mean=self.get_sample_centered_mean(sample_parameter_extracted_sample=self.local_outer_prior_samples[sample_parameter_idx, isample]),
+                        cov=sample_parameter_cov*cov_multiplication_factor,
+                        integrand=integrand
+                    )
 
-                        importance_sampling_weights = self.compute_importance_sampling_weights(
-                            target_density_estimator=target_density_estimator,
-                            proposal_density_estimator=proposal_density_estimator,
-                            eval_points=quadrature_points
-                        )
+                    def proposal_density_estimator(eval_points):
+                                                    probability = self.compute_gaussian_prob(
+                                                        mean=self.get_sample_centered_mean(sample_parameter_extracted_sample=self.local_outer_prior_samples[sample_parameter_idx, isample]),
+                                                        cov=sample_parameter_cov*cov_multiplication_factor,
+                                                        samples=eval_points
+                                                    )
+                                                    return probability
 
-                        individual_likelihood_mean, individual_likelihood_cov = unscented_quad.compute_integeral(
-                            importance_sampling_weights=importance_sampling_weights
-                        )
 
-                        individual_likelihood_prob[isample] = individual_likelihood_mean + \
-                            np.sqrt(individual_likelihood_cov)*np.random.randn(1)
+                    quadrature_points = unscented_quad.compute_quadrature_points()
 
-                        if individual_likelihood_prob[isample] != 0: 
-                                                    break
+                    importance_sampling_weights = self.compute_importance_sampling_weights(
+                        target_density_estimator=target_density_estimator,
+                        proposal_density_estimator=proposal_density_estimator,
+                        eval_points=quadrature_points
+                    )
+
+                    individual_likelihood_mean, individual_likelihood_cov = unscented_quad.compute_integeral(
+                        importance_sampling_weights=importance_sampling_weights
+                    )
+
+                    individual_likelihood_prob[isample] = individual_likelihood_mean + \
+                        np.sqrt(individual_likelihood_cov)*np.random.randn(1)
+
+                    if individual_likelihood_prob[isample] != 0: 
+                                                break
 
             elif quadrature_rule == "gaussian":
 
-                gh = gauss_hermite_quadrature(
-                    mean=sample_parameter_mean,
-                    cov=sample_parameter_cov,
-                    integrand=integrand,
-                    num_points=num_gaussian_quad_pts
-                )
+                # gh = gauss_hermite_quadrature(
+                #     mean=sample_parameter_mean,
+                #     cov=sample_parameter_cov,
+                #     integrand=integrand,
+                #     num_points=num_gaussian_quad_pts
+                # )
 
-                individual_likelihood_prob[isample] = gh.compute_integeral()
+                # individual_likelihood_prob[isample] = gh.compute_integeral()
                 
-                if individual_likelihood_prob[isample] == 0:
+                # if individual_likelihood_prob[isample] == 0:
 
-                    for _, ifactor in enumerate(importance_sampling_cov_factors):
+                for _, ifactor in enumerate(importance_sampling_cov_factors):
 
-                        cov_multiplication_factor = ifactor*np.eye(sample_parameter_mean.shape[0])
+                    cov_multiplication_factor = ifactor*np.eye(sample_parameter_mean.shape[0])
 
-                        gh = gauss_hermite_quadrature(
-                            mean=self.get_sample_centered_mean(sample_parameter_extracted_sample=self.local_outer_prior_samples[sample_parameter_idx, isample]),
-                            cov=sample_parameter_cov*cov_multiplication_factor,
-                            integrand=integrand,
-                            num_points=num_gaussian_quad_pts
-                        )
+                    gh = gauss_hermite_quadrature(
+                        mean=self.get_sample_centered_mean(sample_parameter_extracted_sample=self.local_outer_prior_samples[sample_parameter_idx, isample]),
+                        cov=sample_parameter_cov*cov_multiplication_factor,
+                        integrand=integrand,
+                        num_points=num_gaussian_quad_pts
+                    )
 
-                        def proposal_density_estimator(eval_points):
-                                    probability = self.compute_gaussian_prob(
-                                        mean=self.get_sample_centered_mean(sample_parameter_extracted_sample=self.local_outer_prior_samples[sample_parameter_idx, isample]),
-                                        cov=sample_parameter_cov*cov_multiplication_factor,
-                                        samples=eval_points
-                                    )
-                                    return probability
+                    def proposal_density_estimator(eval_points):
+                                probability = self.compute_gaussian_prob(
+                                    mean=self.get_sample_centered_mean(sample_parameter_extracted_sample=self.local_outer_prior_samples[sample_parameter_idx, isample]),
+                                    cov=sample_parameter_cov*cov_multiplication_factor,
+                                    samples=eval_points
+                                )
+                                return probability
 
-                        quadrature_points, _ = gh.compute_quadrature_points_and_weights()
+                    quadrature_points, _ = gh.compute_quadrature_points_and_weights()
 
-                        importance_sampling_weights = self.compute_importance_sampling_weights(
-                            target_density_estimator=target_density_estimator,
-                            proposal_density_estimator=proposal_density_estimator,
-                            eval_points=quadrature_points
-                        )
+                    importance_sampling_weights = self.compute_importance_sampling_weights(
+                        target_density_estimator=target_density_estimator,
+                        proposal_density_estimator=proposal_density_estimator,
+                        eval_points=quadrature_points
+                    )
 
-                        individual_likelihood_prob[isample] = gh.compute_integeral(
-                            importance_sampling_weights=importance_sampling_weights
-                        )
-                        
-                        if individual_likelihood_prob[isample] != 0: 
-                            break
+                    individual_likelihood_prob[isample] = gh.compute_integeral(
+                        importance_sampling_weights=importance_sampling_weights
+                    )
+                    if individual_likelihood_prob[isample] != 0: 
+                        break
 
             else:
                 raise ValueError("Invalid quadrature rule")
