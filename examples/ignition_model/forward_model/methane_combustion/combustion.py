@@ -4,6 +4,11 @@ import numpy as np
 from matplotlib.ticker import (MultipleLocator, AutoMinorLocator)
 import sys
 import time
+from mpi4py import MPI
+
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
+size = comm.Get_size()
 
 
 plt.rc("text", usetex=True)
@@ -676,13 +681,19 @@ class mech_2S_CH4_Westbrook():
 
         return species_final_mole_fraction
 
-    def compute_ignition_time(self):
+    def compute_ignition_time(self, internal_state="sim"):
         """Function computes the ignition temperature"""
         gas = ct.Solution(yaml = self.get_2S_CH4_Westbrook_gas_file())
         gas.TP = self.initial_temperature, self.initial_pressure
         gas.set_equivalence_ratio(self.equivalence_ratio, "CH4", "O2:1, N2:3.76")
         dt = 1e-6
-        t_end = 1e+5
+        if internal_state == "sim":
+            t_end = 2.0
+        elif internal_state == "plot":
+            t_end = 1e+5
+        else:
+            raise ValueError("Invalid internal state")
+
         reactor = ct.IdealGasConstPressureReactor(gas)
         sim = ct.ReactorNet([reactor])
         states = ct.SolutionArray(gas, extra=['t'])
@@ -698,11 +709,12 @@ class mech_2S_CH4_Westbrook():
                 sim.atol = sim.atol*10
                 simulation_success = False
                 if sim.atol > 1e-1:
+                    print("Simulation failed at time ; {} at atol : {} for rank : {}".format(sim.t, sim.atol, rank))
                     break
         if simulation_success:
             ignition_time, ignition_temperature = compute_ignition_stats(temperature=states.T, time=states.t)
         else:
-            ignition_time = t_end
+            ignition_time = 1e+10
 
         return ignition_time
 
@@ -715,16 +727,6 @@ def compute_ignition_stats(temperature, time):
     temperature_derivative[1:-1] = (temperature[2:] - temperature[0:-2]) / (dt_array[1:] + dt_array[:-1])
     ignition_temperature = temperature[ np.argmax(temperature_derivative) ]
     ignition_time = time[ np.argmax(temperature_derivative) ]
-
-    # plt.figure()
-    # plt.subplot(1, 2, 1)
-    # plt.xscale("log")
-    # plt.plot(time, temperature)
-    # plt.subplot(1, 2, 2)
-    # plt.plot(time, temperature_derivative)
-    # plt.xscale("log")
-    # plt.show()
-    # breakpoint()
 
     return ignition_time, ignition_temperature
 
