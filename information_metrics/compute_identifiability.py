@@ -888,7 +888,7 @@ class conditional_mutual_information(mutual_information):
                 num_gaussian_quad_pts=num_gaussian_quad_pts,
                 case_type=case_type,
                 parent_pair=parent_pair,
-                importance_sampling_cov_factors=[1e-3, 1e-6, 1e-9, 1e-10],
+                importance_sampling_cov_factors=[1e-2, 1e-6, 1e-9, 1e-10],
             )
         else:
             assert(self.restart is False), "Error"
@@ -1026,18 +1026,6 @@ class conditional_mutual_information(mutual_information):
                 return integrand_val
 
             if quadrature_rule == "unscented":
-                # unscented_quad = unscented_quadrature(
-                #     mean=sample_parameter_mean,
-                #     cov=sample_parameter_cov,
-                #     integrand=integrand
-                # )
-
-                # individual_likelihood_mean, individual_likelihood_cov = unscented_quad.compute_integeral()
-
-                # individual_likelihood_prob[isample] = individual_likelihood_mean + \
-                #     np.sqrt(individual_likelihood_cov)*np.random.randn(1)
-
-                # if individual_likelihood_prob[isample] == 0:
 
                 # Use importance sampling
                 for _, ifactor in enumerate(importance_sampling_cov_factors):
@@ -1079,17 +1067,6 @@ class conditional_mutual_information(mutual_information):
                                                 break
 
             elif quadrature_rule == "gaussian":
-
-                # gh = gauss_hermite_quadrature(
-                #     mean=sample_parameter_mean,
-                #     cov=sample_parameter_cov,
-                #     integrand=integrand,
-                #     num_points=num_gaussian_quad_pts
-                # )
-
-                # individual_likelihood_prob[isample] = gh.compute_integeral()
-                
-                # if individual_likelihood_prob[isample] == 0:
 
                 for _, ifactor in enumerate(importance_sampling_cov_factors):
 
