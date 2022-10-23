@@ -192,8 +192,8 @@ class learn_ignition_model():
 
     def plot_map_estimate(self, theta_map, theta_map_cov):
         """Function plots the map estimate"""
-        num_samples = 200
-        temperature_range = np.linspace(700, 3333, 50) 
+        num_samples = 50
+        temperature_range = np.linspace(833, 3333, num_samples) 
         calibrated_model_prediction = np.zeros((num_samples, temperature_range.shape[0]))
         un_calibrated_model_prediction = np.zeros_like(temperature_range)
         gri_prediction = np.zeros_like(temperature_range)
@@ -221,7 +221,7 @@ class learn_ignition_model():
                         Arrhenius_A=Arrhenius_A
                         )
 
-                calibrated_model_prediction[ii, jj] = np.log(model_2S_CH4_Westbrook.compute_ignition_time())
+                calibrated_model_prediction[ii, jj] = np.log(model_2S_CH4_Westbrook.compute_ignition_time(internal_state="plot"))
 
         for ii,itemp in enumerate(temperature_range):
             # Compute gri prediciton
@@ -239,7 +239,7 @@ class learn_ignition_model():
                     equivalence_ratio = 1.0,
                     )
 
-            un_calibrated_model_prediction[ii] = np.log(model_2S_CH4_Westbrook.compute_ignition_time())
+            un_calibrated_model_prediction[ii] = np.log(model_2S_CH4_Westbrook.compute_ignition_time(internal_state="plot"))
 
 
         mean_val = np.mean(calibrated_model_prediction, axis=0)
@@ -260,8 +260,7 @@ class learn_ignition_model():
         axs.xaxis.set_minor_locator(MultipleLocator(0.05))
         axs.xaxis.set_major_locator(MultipleLocator(0.2))
         axs.yaxis.set_minor_locator(AutoMinorLocator())
-        # axs.set_ylim([10**(-7), 10**(3)])
-        axs.set_xlim([0.2, 1.6])
+        axs.set_xlim([0.2, 1.4])
         plt.tight_layout()
         plt.savefig(save_fig_path)
         plt.close()
@@ -397,6 +396,7 @@ def main():
                 theta_map=theta_map,
                 theta_map_cov=theta_map_cov
                 )
+
     elif ("--plotmle" in sys.argv):
         theta_mle = np.load(os.path.join(campaign_path, "theta_mle.npy"))
         learning_model.plot_mle_estimate(
