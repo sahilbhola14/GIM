@@ -63,7 +63,7 @@ class learn_ignition_model():
 
     def compute_Arrehenius_A(self, theta, equivalence_ratio, initial_temperature):
         """Function computes the pre exponential factor, A for the Arrhenius rate"""
-        lambda_1 = 20 + (2)*theta[0] 
+        lambda_1 = 18 + (1)*theta[0] 
         lambda_2 = theta[1] 
         lambda_3 = theta[2] 
         log_A = lambda_1 + np.tanh((lambda_2 + lambda_3*equivalence_ratio)*(initial_temperature/1000))
@@ -193,7 +193,7 @@ class learn_ignition_model():
     def plot_map_estimate(self, theta_map, theta_map_cov):
         """Function plots the map estimate"""
         num_samples = 50
-        temperature_range = np.linspace(833, 3333, num_samples) 
+        temperature_range = np.linspace(833, 2333, num_samples) 
         calibrated_model_prediction = np.zeros((num_samples, temperature_range.shape[0]))
         un_calibrated_model_prediction = np.zeros_like(temperature_range)
         gri_prediction = np.zeros_like(temperature_range)
