@@ -82,7 +82,7 @@ class mutual_information():
         if write_proc_log_file:
             proc_log_file_path = os.path.join(self.save_path, "proc_{}_log_file.dat".format(rank))
             self.proc_log_file = open(proc_log_file_path, "w")
-
+            
 
     def compute_local_num_outer_samples(self):
         """Function computes the number of local number of samples"""
@@ -148,7 +148,8 @@ class mutual_information():
         num_samples = theta.shape[1]
         prediction = np.zeros(self.ytrain.shape+(num_samples, ))
         for isample in range(num_samples):
-            prediction[:, :, isample] = self.forward_model(theta[:, isample])
+            self.write_proc_log_file("     (Model, {}/{}) theta: [{}, {}, {}]".format(isample, theta.shape[1]-1, theta[0, isample], theta[1, isample], theta[2, isample]));
+            prediction[:, :, isample] = self.forward_model(theta[:, isample], proc_log_file=self.proc_log_file)
         return prediction
 
     def sample_likelihood(self, theta):
@@ -587,6 +588,7 @@ class conditional_mutual_information(mutual_information):
                     data=self.local_outer_data_samples,
                     model_prediction=self.local_outer_model_prediction
                 )
+
             else:
                 self.write_log_file("Loaded outer Likelihood prob")
                 self.write_log_file("----------------")
@@ -661,6 +663,8 @@ class conditional_mutual_information(mutual_information):
                 label="individual_parameter_counter",
                 sub_type="ICMI"
             )
+
+            self.write_log_file(" MI : {}".format(inidividual_mutual_information))
 
             self.save_quantity(
                 "estimated_individual_mutual_information.npy", inidividual_mutual_information)
@@ -868,6 +872,8 @@ class conditional_mutual_information(mutual_information):
             self.write_log_file(
                 ">>> End Pair {}/{} computations\n".format(np.arange(parameter_combinations.shape[0])[lower_parameter_pair_loop_idx:][jj]+1, parameter_combinations.shape[0]))
 
+            self.write_log_file(" CMI : {}".format(pair_mutual_information))
+
             self.save_quantity(
                 "estimated_pair_mutual_information.npy", pair_mutual_information)
 
@@ -1022,8 +1028,8 @@ class conditional_mutual_information(mutual_information):
             return probability
         
         for isample in range(local_lower_loop_idx, self.local_num_outer_samples):
-            if (isample%10 == 0 or isample == self.local_num_outer_samples-1) and self.write_proc_log_file:
-                self.write_proc_log_file("   (Inner) Sample# : {}/{} [Sampling : {}".format(isample, self.local_num_outer_samples-1, parameter_pair))
+            if (isample%1 == 0 or isample == self.local_num_outer_samples-1) and self.write_proc_log_file:
+                self.write_proc_log_file("   \n(Inner) Sample# : {}/{} [Sampling : {}]\n".format(isample, self.local_num_outer_samples-1, parameter_pair))
 
             # Extract outer sample
             outer_sample = np.expand_dims(
