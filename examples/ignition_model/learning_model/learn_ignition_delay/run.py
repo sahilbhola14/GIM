@@ -9,8 +9,8 @@ import sys
 import time
 import os
 from mpi4py import MPI
-sys.path.append("/home/sbhola/Documents/CASLAB/GIM/examples/ignition_model/forward_model/methane_combustion")
-sys.path.append("/home/sbhola/Documents/CASLAB/GIM/information_metrics")
+sys.path.append("../../forward_model/methane_combustion")
+sys.path.append("../../../../information_metrics")
 from combustion import mech_1S_CH4_Westbrook, mech_2S_CH4_Westbrook, mech_gri 
 from compute_identifiability import mutual_information, conditional_mutual_information
 
@@ -74,7 +74,7 @@ class learn_ignition_model():
         Arrhenius_Ea = 30000 + 10000*theta[3]
         return Arrhenius_Ea
 
-    def compute_model_prediction(self, theta):
+    def compute_model_prediction(self, theta, proc_log_file=None):
         """Function computes the model prediction, Temperature"""
         prediction = np.zeros((self.num_data_points, self.spatial_resolution))
         for idata_sample in range(self.num_data_points):
@@ -88,6 +88,9 @@ class learn_ignition_model():
                     equivalence_ratio=equivalence_ratio,
                     initial_temperature=initial_temperature
                     )
+            if proc_log_file is not None:
+                proc_log_file.write("     Arrhenius_A: {0:.18f}\n".format(Arrhenius_A))
+                proc_log_file.flush()
 
             combustion_model = mech_2S_CH4_Westbrook(
                     initial_temperature=initial_temperature,
@@ -95,8 +98,12 @@ class learn_ignition_model():
                     equivalence_ratio=equivalence_ratio,
                     Arrhenius_A=Arrhenius_A,
                     )
-            ignition_temperature = combustion_model.compute_ignition_time()
-            prediction[idata_sample, :] = np.log(ignition_temperature) 
+            ignition_time = combustion_model.compute_ignition_time()
+            prediction[idata_sample, :] = np.log(ignition_time) 
+            if proc_log_file is not None:
+                proc_log_file.write("     Prediction: {}\n".format(prediction[idata_sample, :]))
+                proc_log_file.flush()
+
         return prediction
 
     def compute_complete_state(self, theta):
@@ -330,8 +337,12 @@ class learn_ignition_model():
 
     def compute_model_identifiability(self, prior_mean, prior_cov):
         """Function computes the model identifiability"""
+        def forward_model(theta, proc_log_file=None):
+            prediction = self.compute_model_prediction(theta, proc_log_file=proc_log_file).T
+            return prediction
+
         estimator = conditional_mutual_information(
-                forward_model=self.compute_model_prediction,
+                forward_model=forward_model,
                 prior_mean=prior_mean,
                 prior_cov=prior_cov,
                 model_noise_cov_scalar=self.model_noise_cov,
@@ -339,20 +350,19 @@ class learn_ignition_model():
                 global_num_inner_samples=self.global_num_inner_samples,
                 save_path=self.campaign_path,
                 restart=self.restart_identifiability,
-                ytrain=self.ytrain,
+                ytrain=self.ytrain.T,
                 log_file=self.log_file,
                 ) 
-
         
         estimator.compute_individual_parameter_data_mutual_information_via_mc(
                 use_quadrature=True,
-                single_integral_gaussian_quad_pts=50
+                single_integral_gaussian_quad_pts=7
                 )
 
         estimator.compute_posterior_pair_parameter_mutual_information(
                 use_quadrature=True,
-                single_integral_gaussian_quad_pts=60,
-                double_integral_gaussian_quad_pts=60
+                single_integral_gaussian_quad_pts=7,
+                double_integral_gaussian_quad_pts=10
                 )
 
 def load_configuration_file(config_file_path="./config.yaml"):
@@ -374,6 +384,8 @@ def main():
     # Campaign path
     campaign_path = os.path.join(os.getcwd(), "campaign_results/campaign_%d"%(config_data["campaign_id"]))
 
+
+
     # Learning model
     learning_model = learn_ignition_model(
             config_data=config_data,
@@ -381,6 +393,7 @@ def main():
             prior_mean=prior_mean,
             prior_cov=prior_cov
             )
+
     if config_data['compute_mle']:
         theta_mle = learning_model.compute_mle()
         np.save(os.path.join(campaign_path, "theta_mle.npy"), theta_mle)
