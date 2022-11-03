@@ -9,8 +9,8 @@ import sys
 import time
 import os
 from mpi4py import MPI
-sys.path.append("../../forward_model/methane_combustion")
-sys.path.append("../../../../information_metrics")
+sys.path.append("../forward_model/methane_combustion")
+sys.path.append("../../../information_metrics")
 from combustion import mech_1S_CH4_Westbrook, mech_2S_CH4_Westbrook, mech_gri 
 from compute_identifiability import mutual_information, conditional_mutual_information
 
@@ -200,7 +200,7 @@ class learn_ignition_model():
     def plot_map_estimate(self, theta_map, theta_map_cov):
         """Function plots the map estimate"""
         num_samples = 50
-        temperature_range = np.linspace(833, 2333, num_samples) 
+        temperature_range = np.linspace(833, 2500, num_samples) 
         calibrated_model_prediction = np.zeros((num_samples, temperature_range.shape[0]))
         un_calibrated_model_prediction = np.zeros_like(temperature_range)
         gri_prediction = np.zeros_like(temperature_range)
@@ -253,7 +253,7 @@ class learn_ignition_model():
         std_val = np.std(calibrated_model_prediction, axis=0)
 
         save_fig_path = os.path.join(self.campaign_path, "Figures/prediction_map_phi_{}_pressure_{}_noise_{}.png".format(1.0, 100000, self.model_noise_cov))
-        fig, axs = plt.subplots(figsize=(12, 7))
+        fig, axs = plt.subplots(figsize=(11, 7))
         axs.scatter(1000/self.initial_temperature, self.ytrain.ravel(), label="Data", color="k", marker="s", s=100)
         axs.plot(1000/temperature_range, gri_prediction, "--", label="Gri-Mech 3.0", color="k")
         axs.plot(1000/temperature_range, un_calibrated_model_prediction, label=r"2-step mechanism [Westbrook \textit{et al.}]", color="r")
@@ -261,13 +261,14 @@ class learn_ignition_model():
         axs.fill_between(1000/temperature_range, mean_val+std_val, mean_val-std_val, ls="--", edgecolor="C0",lw=2, alpha=0.3, label=r"$\pm\sigma_{MAP}$")
         axs.set_xlabel(r"1000/T [1/K]")
         axs.set_ylabel(r"$\log(t_{ign})$")
-        axs.legend(loc="lower right")
+        axs.legend(loc="upper left")
         axs.grid(True, axis="both", which="major",color="k", alpha=0.5)
         axs.grid(True, axis="both", which="minor",color="grey", alpha=0.3)
         axs.xaxis.set_minor_locator(MultipleLocator(0.05))
         axs.xaxis.set_major_locator(MultipleLocator(0.2))
         axs.yaxis.set_minor_locator(AutoMinorLocator())
-        axs.set_xlim([0.2, 1.4])
+        axs.set_xlim([0.4, 1.2])
+        axs.set_ylim([-15, 10])
         plt.tight_layout()
         plt.savefig(save_fig_path)
         plt.close()
@@ -354,14 +355,14 @@ class learn_ignition_model():
                 log_file=self.log_file,
                 ) 
         
-        estimator.compute_individual_parameter_data_mutual_information_via_mc(
-                use_quadrature=True,
-                single_integral_gaussian_quad_pts=7
-                )
+        # estimator.compute_individual_parameter_data_mutual_information_via_mc(
+        #         use_quadrature=True,
+        #         single_integral_gaussian_quad_pts=5
+        #         )
 
         estimator.compute_posterior_pair_parameter_mutual_information(
                 use_quadrature=True,
-                single_integral_gaussian_quad_pts=7,
+                single_integral_gaussian_quad_pts=5,
                 double_integral_gaussian_quad_pts=10
                 )
 
