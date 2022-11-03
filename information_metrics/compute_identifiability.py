@@ -548,6 +548,7 @@ class conditional_mutual_information(mutual_information):
             ">>> Begin computing the individual parameter mutual information, I(theta_i;Y|theta_[rest of parameters])")
         self.write_log_file(
             ">>>-----------------------------------------------------------<<<\n")
+        self.write_log_file("Use_quadrature : {} with single intergral quad pts: {}".format(use_quadrature, single_integral_gaussian_quad_pts))
 
         if self.outer_data_computation_req_flag is True:
             # Generate the prior samples ~ p(\theta)
@@ -669,8 +670,11 @@ class conditional_mutual_information(mutual_information):
             self.save_quantity(
                 "estimated_individual_mutual_information.npy", inidividual_mutual_information)
 
+        self.write_log_file(" Normalized MI : {}".format(inidividual_mutual_information / np.sum(np.abs(inidividual_mutual_information))))
+
         self.write_log_file(
             ">>> End computing the individual parameter mutual information, I(theta_i;Y)")
+
 
     def compute_posterior_pair_parameter_mutual_information(self, use_quadrature=False, single_integral_gaussian_quad_pts=60, double_integral_gaussian_quad_pts=30):
         """Function computes the posterior mutual information between parameters, I(theta_i;theta_j|Y, theta_k)"""
@@ -691,6 +695,8 @@ class conditional_mutual_information(mutual_information):
             ">>> Begin computing the pair parameter mutual information, I(theta_i;theta_j|Y, theta_[rest of parameters])")
         self.write_log_file(
             ">>>-----------------------------------------------------------<<<\n")
+
+        self.write_log_file("Use_quadrature : {} with single intergral quad pts: {} and double integral quad pts : {}(x2)".format(use_quadrature, single_integral_gaussian_quad_pts, double_integral_gaussian_quad_pts))
 
         if self.outer_data_computation_req_flag is True:
             # Generate the prior samples ~ p(\theta)
@@ -885,6 +891,8 @@ class conditional_mutual_information(mutual_information):
                 label="pair_parameter_counter",
                 sub_type="PCMI"
             )
+
+        self.write_log_file(" Normalized CMI : {}".format(pair_mutual_information/np.sum(np.abs(pair_mutual_information))))
 
     def estimate_pair_likelihood(self, parameter_pair, use_quadrature, quadrature_rule="gaussian"):
         """Function commputes the pair likelihood defined as p(y|theta_{k})"""
