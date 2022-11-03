@@ -3,3 +3,4 @@ undodir/
 *png
 *dat
 *ipynb
+__pycache__
