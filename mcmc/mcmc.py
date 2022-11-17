@@ -4,7 +4,6 @@ Date: 11-17-2022
 Description: This script implements the Metropolis-Hastings algorithm
 in an objective oriented manner.
 """
-
 import numpy as np
 from mcmc_utils import *
 
@@ -87,9 +86,18 @@ class mcmc():
         return proposal_log_pdf
 
 class metropolis_hastings(mcmc):
-    def __init__(self, initial_sample, target_log_pdf_evaluator, num_samples):
-        prop_log_pdf_evaluator  = lambda x, y: self.evaluate_random_walk_pdf(x, y, cov=np.eye(self.dim))
-        prop_log_pdf_sampler = lambda x: self.sample_random_walk_pdf(x, cov=np.eye(self.dim))
+    def __init__(self, initial_sample, target_log_pdf_evaluator, num_samples, sd = None, cov=None):
+        dim = len(initial_sample)
+        if cov is None:
+            if sd is None:
+                proposal_cov = ((2.4**2) / dim)*np.eye(dim)
+            else:
+                proposal_cov = sd*np.eye(dim)
+        else:
+            proposal_cov = cov
+
+        prop_log_pdf_evaluator  = lambda x, y: self.evaluate_random_walk_pdf(x, y, cov=proposal_cov)
+        prop_log_pdf_sampler = lambda x: self.sample_random_walk_pdf(x, cov=proposal_cov)
 
         # Initialize the parent class
         super().__init__(initial_sample, target_log_pdf_evaluator, num_samples, prop_log_pdf_evaluator, prop_log_pdf_sampler)
