@@ -1,5 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib import cm
+from matplotlib.gridspec import GridSpec
+
 plt.rc('text', usetex=True)
 plt.rc('font', family='serif', size=20)
 plt.rc('axes', labelsize=20, titlepad=20)
@@ -30,6 +33,18 @@ def evaluate_gaussian_log_pdf(sample, mean, cov):
     inner_solve = np.linalg.solve(cov, error)
     log_pdf = -0.5*np.dot(error.T, inner_solve)
     return log_pdf
+
+def build_cov_mat(std1, std2, rho):
+    """Build a covariance matrix for a bivariate Gaussian distribution
+    :param std1: standard deviation of the first variable
+    :param std2: standard deviation of the second variable
+    :param rho: correlation coefficient
+    :return: covariance matrix
+    """
+    assert std1 > 0, "standard deviation must be greater than 0"
+    assert std2 > 0, "standard deviation must be greater than 0"
+    assert np.abs(rho) <= 1, "correlation must be betwene -1 and 1"
+    return np.array([[std1**2, rho * std1 * std2], [rho * std1 * std2, std2**2]])
 
 def sub_sample_data(samples, frac_burn=0.2, frac_use=0.7):
     """Subsample data by burning off the front fraction and using another fraction
@@ -249,3 +264,34 @@ def plot_chains(samples, title=None):
     if title is not None:
         fig.suptitle(title)
     return fig, axs
+
+def autocorrelation(samples, maxlag=100, step=1):
+    """Compute the correlation of a set of samples
+    Written by: Alex Gorodedsky
+    :param samples: samples from the MCMC, (Num of samples, Num of parameters)
+    :param maxlag: maximum lag to compute the correlation
+    :param step: step to compute the correlation
+    :return: lags, correlation
+    """
+
+    # Get the shapes
+    ndim = samples.shape[1]
+    nsamples = samples.shape[0]
+
+    # Compute the mean
+    mean = np.mean(samples, axis=0)
+
+    # Compute the denominator, which is variance
+    denominator = np.zeros((ndim))
+    for ii in range(nsamples):
+        denominator = denominator + (samples[ii, :] - mean)**2
+
+    lags = np.arange(0, maxlag, step)
+    autos = np.zeros((len(lags), ndim))
+    for zz, lag in enumerate(lags):
+        autos[zz, :] = np.zeros((ndim))
+        # compute the covariance between all samples *lag apart*
+        for ii in range(nsamples - lag):
+            autos[zz,:] = autos[zz, :] + (samples[ii,:]-mean)*(samples[ii + lag,:] -mean)
+        autos[zz, :] = autos[zz, :]/denominator
+    return lags, autos
