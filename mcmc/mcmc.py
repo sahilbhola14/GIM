@@ -143,6 +143,7 @@ class adaptive_metropolis_hastings(mcmc):
                 self.sd = sd
                 self.proposal_cov=  self.sd*np.eye(dim)
         else:
+            self.sd = 2.4/np.sqrt(dim)
             self.proposal_cov = initial_cov
 
         assert np.all(np.linalg.eigvals(self.proposal_cov) > 0), "The initial covariance matrix must be positive definite"
