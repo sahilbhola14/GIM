@@ -221,21 +221,34 @@ class adaptive_metropolis_hastings(mcmc):
 
         self.compute_k_sample_mean(x)
 
-def log_normal_log_pdf(sample, mean, cov):
-    """Function evaluates the log normal pdf"""
+def test_gaussian(sample):
+    """Function evaluates the log normal pdf
+    :param sample: The sample to evaluate (D, 1)
+    :return: The log pdf value
+    """
+    mean = np.arange(1, 3).reshape(-1, 1)
+    cov = build_cov_mat(1.0, 1.0, 0.5) # std, std, correlation
     error = sample - mean
     inner_solve = np.linalg.solve(cov, error)
     inner_exponential_term = error.T@inner_solve
     return -0.5*inner_exponential_term
 
-def main():
-    gauss_mean = np.array([1, 0]).reshape(-1, 1)
-    gauss_cov = np.ones((2, 2))
-    gauss_cov[0, 1] = 0.9
-    gauss_cov[1, 0] = 0.9
-    true_samples = sample_gaussian(gauss_mean, gauss_cov, 10000)
+def test_banana(sample):
+    """Function evaluates the log normal pdf
+    :param sample: The sample to evaluate (D, 1)
+    :return: The log pdf value
+    """
+    a = 1.0
+    b = 100.0
+    x = sample[0, 0]
+    y = sample[1, 0]
+    logpdf = (a-x)**2 + b * (y - x**2)**2
+    return -logpdf
 
-    target_log_pdf = lambda x: log_normal_log_pdf(x.reshape(-1, 1), gauss_mean, gauss_cov)
+
+def main():
+    # target_log_pdf = lambda x: test_gaussian(x.reshape(-1, 1))
+    target_log_pdf = lambda x: test_banana(x.reshape(-1, 1))
     num_samples = 10000
     initial_sample = np.random.randn(2)
 
@@ -259,6 +272,13 @@ def main():
 
     # Plot the samples
     fig, axs = plot_chains(burned_samples, title="Adaptive Metropolis Hastings")
+    plt.show()
+
+    # Plot samples from posterior
+    fig, axs, gs = scatter_matrix([burned_samples], labels=[r'$x_1$', r'$x_2$'],
+                              hist_plot=False, gamma=0.4)
+
+    fig.set_size_inches(7,7)
     plt.show()
 
 if __name__ == "__main__":
