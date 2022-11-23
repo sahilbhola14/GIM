@@ -17,7 +17,7 @@ def sample_gaussian(mean, cov, n):
     """
     assert np.allclose(cov, cov.T), "Covariance matrix must be symmetric"
     assert np.all(np.linalg.eigvals(cov) > 0), "Covariance matrix must be positive definite"
-    chol = np.linalg.cholesky(cov)
+    chol = np.linalg.cholesky(cov + 1e-8 * np.eye(cov.shape[0]))
     return mean + np.dot(chol, np.random.randn(mean.shape[0], n))
 
 def evaluate_gaussian_log_pdf(sample, mean, cov):
