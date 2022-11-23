@@ -99,34 +99,39 @@ class mcmc():
         return proposal_log_pdf
 
 class metropolis_hastings(mcmc):
-    def __init__(self, initial_sample, target_log_pdf_evaluator, num_samples, sd = None, cov=None):
-        dim = len(initial_sample)
-        if cov is None:
-            if sd is None:
-                proposal_cov = ((2.4**2) / dim)*np.eye(dim)
-            else:
-                proposal_cov = sd*np.eye(dim)
-        else:
-            proposal_cov = cov
+    def __init__(self, initial_sample, target_log_pdf_evaluator, num_samples, sd = None, initial_cov=None):
 
-        prop_log_pdf_evaluator  = lambda x, y: self.evaluate_random_walk_pdf(x, y, cov=proposal_cov)
-        prop_log_pdf_sampler = lambda x: self.sample_random_walk_pdf(x, cov=proposal_cov)
+        dim = len(initial_sample)
+        if sd is None:
+            self.sd = 2.4/np.sqrt(dim)
+        else:
+            self.sd = sd
+
+        if initial_cov is None:
+            self.proposal_cov = (self.sd)*np.eye(dim)
+        else:
+            self.proposal_cov = initial_cov
+
+        assert np.all(np.linalg.eigvals(self.proposal_cov) > 0), "The covariance matrix is not positive definite"
+
+        prop_log_pdf_evaluator  = lambda x, y: self.evaluate_random_walk_pdf(x, y)
+        prop_log_pdf_sampler = lambda x: self.sample_random_walk_pdf(x)
 
         # Initialize the parent class
         super().__init__(initial_sample, target_log_pdf_evaluator, num_samples, prop_log_pdf_evaluator, prop_log_pdf_sampler)
 
-    def evaluate_random_walk_pdf(self, x, y, cov):
+    def evaluate_random_walk_pdf(self, x, y):
         """evaluate the random walk pdf"""
-        proposal_log_pdf = evaluate_gaussian_log_pdf(x[:, None], y[:, None], cov)
+        proposal_log_pdf = evaluate_gaussian_log_pdf(x[:, None], y[:, None], self.proposal_cov)
         return proposal_log_pdf.item()
 
-    def sample_random_walk_pdf(self, x, cov):
+    def sample_random_walk_pdf(self, x):
         """Sample from the random walk pdf"""
-        proposed_sample = sample_gaussian(x.reshape(-1, 1), cov, 1)
+        proposed_sample = sample_gaussian(x.reshape(-1, 1), self.proposal_cov, 1)
         return proposed_sample.reshape(-1)
 
 class adaptive_metropolis_hastings(mcmc):
-    def __init__(self, initial_sample, target_log_pdf_evaluator, num_samples, adapt_sample_threshold = 100, sd = None, initial_cov=None):
+    def __init__(self, initial_sample, target_log_pdf_evaluator, num_samples, adapt_sample_threshold = 100, sd = None, initial_cov=None, eps=1e-8, reset_frequency=100):
 
         # Assert statements
         assert adapt_sample_threshold < num_samples, "The adaptation sample threshold must be less than the total number of samples"
@@ -134,25 +139,34 @@ class adaptive_metropolis_hastings(mcmc):
         # Initialize the child class
 
         dim = len(initial_sample)
-        self.eps = 1e-8
-        if initial_cov is None:
-            if sd is None:
-                self.sd = 2.4/np.sqrt(dim)
-                self.proposal_cov = (self.sd)*np.eye(dim)
-            else:
-                self.sd = sd
-                self.proposal_cov=  self.sd*np.eye(dim)
-        else:
+        self.eps = eps
+        if sd is None:
             self.sd = 2.4/np.sqrt(dim)
+        else:
+            self.sd = sd
+
+        if initial_cov is None:
+            self.proposal_cov = (self.sd)*np.eye(dim)
+        else:
             self.proposal_cov = initial_cov
 
         assert np.all(np.linalg.eigvals(self.proposal_cov) > 0), "The initial covariance matrix must be positive definite"
         assert(self.proposal_cov.shape == (dim, dim)), "The initial covariance matrix must be a square matrix"
 
         self.adapt_sample_threshold = adapt_sample_threshold
+
+        self.initial_cov = self.proposal_cov
+
         self.sample_count = 0
-        self.k_sample_mean = initial_sample
-        self.k_sample_cov = self.proposal_cov
+        self.k = 0
+
+        self.old_mean = initial_sample
+        self.new_mean = initial_sample
+
+        self.old_cov = self.proposal_cov
+        self.new_cov = np.nan*np.ones((dim, dim))
+
+        self.reset_frequency = reset_frequency
 
         prop_log_pdf_evaluator  = lambda x, y: self.evaluate_adaptive_random_walk_pdf(x, y)
         prop_log_pdf_sampler = lambda x: self.sample_adaptive_random_walk_pdf(x)
@@ -169,14 +183,29 @@ class adaptive_metropolis_hastings(mcmc):
     def sample_adaptive_random_walk_pdf(self, x):
         """Sample from the adaptive random walk pdf"""
 
+        assert np.prod(x.shape) == self.dim , "The current sample must be a vector of length dim"
+
+        # Update K
+        self.k = self.sample_count
+
         # Update the sample count
         self.increase_count()
 
-        # Update the k-sample statistics
-        self.compute_k_sample_statistics(x)
+        # Update the old mean
+        self.update_old_mean()
 
-        # Update the proposal covariance
+        # Recursively update the new mean
+        self.update_recursive_mean(x)
+
+        # Recursively update the new covariance
+        self.update_recursive_cov(x)
+
         if self.sample_count > self.adapt_sample_threshold:
+
+            # Update the old covariance
+            self.update_old_cov()
+
+            # Update the proposal covariance
             self.update_proposal_covariance()
 
         proposed_sample = sample_gaussian(x.reshape(-1, 1), self.proposal_cov, 1)
@@ -184,43 +213,66 @@ class adaptive_metropolis_hastings(mcmc):
 
     def update_proposal_covariance(self):
         """Function updates the covariance matrix via the samples"""
-        # print("Updating the proposal covariance matrix", flush=True)
-        # time.sleep(1)
-        self.proposal_cov = self.sd*(self.k_sample_cov + self.eps*np.eye(self.k_sample_cov.shape[0]))
-        assert np.all(np.linalg.eigvals(self.proposal_cov) > 0), "The proposal covariance matrix is not positive definite"
+        self.proposal_cov = self.new_cov
 
     def increase_count(self):
         """Function increases the sample count"""
         self.sample_count += 1
 
-    def compute_k_sample_mean(self, x):
-        """Function computes the sample mean"""
-        self.k_sample_mean = (x / self.sample_count) + ((self.sample_count - 1) / self.sample_count)*self.k_sample_mean
-        assert  self.k_sample_mean.shape == x.shape, "The sample mean shape is not correct"
+    def update_recursive_mean(self, x):
+        """Function updates the recursive mean"""
+        # Update new mean
+        self.new_mean = (1/(self.k + 1)) * x + (self.k/(self.k + 1)) * self.old_mean
 
-    def compute_k_sample_cov(self, x):
-        """Function computes the sample covariance"""
+        assert self.new_mean.shape == x.shape, "The new mean shape is not correct"
 
-        term_1 = ((self.sample_count - 2) / (self.sample_count - 1))*self.k_sample_cov
+    def update_recursive_cov(self, x):
+        """Function updates the recursive covariance"""
 
-        term_2 = np.outer(self.k_sample_mean, self.k_sample_mean)
+        multiplier = (self.eps*np.eye(self.dim)) + \
+                (self.k*np.outer(self.old_mean, self.old_mean)) - \
+                (self.k+1)*np.outer(self.new_mean, self.new_mean) + \
+                (np.outer(x, x))
 
-        term_3 = (1 / self.sample_count)*np.outer(x, x)
+        if self.sample_count > self.adapt_sample_threshold:
 
-        updated_mean = (x / self.sample_count) + ((self.sample_count - 1) / self.sample_count)*self.k_sample_mean
+            if self.sample_count % self.reset_frequency == 0:
+                self.reset_mean()
+                self.reset_cov()
 
-        term_4 = ((self.sample_count)/(self.sample_count - 1))*np.outer(updated_mean, updated_mean)
+            # Update new covariance matrix
+            self.new_cov = ((self.k-1)/self.k)*self.old_cov + (self.sd/self.k)*multiplier
 
-        self.k_sample_cov = term_1 + term_2 + term_3 - term_4
+            assert self.new_cov.shape == (x.shape[0], x.shape[0]), "The new covariance shape is not correct"
+            assert np.all(np.linalg.eigvals(self.new_cov) > 0), "The new covariance matrix is not positive definite"
 
-        assert self.k_sample_cov.shape == (x.shape[0], x.shape[0]), "The sample covariance shape is not correct"
 
-    def compute_k_sample_statistics(self, x):
-        """Function computes the k-sample statistics"""
-        if self.sample_count > 1:
-            self.compute_k_sample_cov(x)
+        elif self.sample_count > 1:
 
-        self.compute_k_sample_mean(x)
+            # Update the old covariance matrix
+            self.old_cov = ((self.k-1)/self.k)*self.proposal_cov + (self.sd/self.k)*multiplier
+
+        else:
+
+            pass
+
+    def update_old_mean(self):
+        """Function updates the old mean"""
+        self.old_mean = self.new_mean
+
+    def update_old_cov(self):
+        """Function updates the old covariance"""
+        self.old_cov = self.new_cov
+
+    def reset_mean(self):
+        """Function resets the mean"""
+        self.old_mean = self.initial_sample
+        self.new_mean = self.initial_sample
+
+    def reset_cov(self):
+        """Function resets the covariance"""
+        self.old_cov = self.initial_cov
+        self.new_cov = np.nan*np.ones((self.dim, self.dim))
 
 def test_gaussian(sample):
     """Function evaluates the log normal pdf
@@ -248,8 +300,8 @@ def test_banana(sample):
 
 
 def main():
-    # target_log_pdf = lambda x: test_gaussian(x.reshape(-1, 1))
-    target_log_pdf = lambda x: test_banana(x.reshape(-1, 1))
+    target_log_pdf = lambda x: test_gaussian(x.reshape(-1, 1))
+    # target_log_pdf = lambda x: test_banana(x.reshape(-1, 1))
     num_samples = 10000
     initial_sample = np.random.randn(2)
 
@@ -258,11 +310,12 @@ def main():
             target_log_pdf_evaluator=target_log_pdf,
             num_samples=num_samples,
             adapt_sample_threshold=1000,
-            sd=1
+            reset_frequency=50,
             )
 
     #Compute the samples
     mcmc_sampler.compute_mcmc_samples(verbose=True)
+    print(mcmc_sampler.proposal_cov)
 
     #Compute acceptance rate
     ar = mcmc_sampler.compute_acceptance_ratio()
