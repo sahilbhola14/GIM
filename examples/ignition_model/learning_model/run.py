@@ -82,7 +82,7 @@ class learn_ignition_model:
     def compute_Arrehenius_A(self, theta, initial_temperature, equivalence_ratio):
         """Function computes the pre exponential factor, A for the Arrhenius rate"""
 
-        if self.n_parameter_model == 4:
+        if self.n_parameter_model == 4 or self.n_parameter_model == 3:
             l_0 = 18 + theta[0]
             l_1 = theta[1]
             l_2 = theta[2]
@@ -117,10 +117,14 @@ class learn_ignition_model:
 
     def compute_Arrehenius_Ea(self, theta):
         """Function computes the Arrhenius activation energy"""
-        if self.n_parameter_model == 4:
+        if self.n_parameter_model == 3:
+            Arrhenius_Ea = 48400
+        elif self.n_parameter_model == 4:
             Arrhenius_Ea = 30000 + 10000 * theta[3]
         elif self.n_parameter_model == 8:
             Arrhenius_Ea = 30000 + 10000 * theta[7]
+        else:
+            raise ValueError("Number of parameters in the model not supported")
         return Arrhenius_Ea
 
     def compute_model_prediction(self, theta, proc_log_file=None):
