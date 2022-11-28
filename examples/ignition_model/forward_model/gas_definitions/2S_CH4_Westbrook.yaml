@@ -134,7 +134,3 @@ reactions:
 - equation: CO2 => CO + 0.5 O2 # Reaction 3
   rate-constant: {A: 5.0e+8, b: 0, Ea: 40000.0}
   orders: {CO2: 1}
-
-
-
-

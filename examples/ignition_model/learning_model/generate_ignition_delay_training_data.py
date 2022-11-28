@@ -2,7 +2,7 @@ import numpy as np
 import yaml
 import os
 import matplotlib.pyplot as plt
-from matplotlib.ticker import (MultipleLocator, AutoMinorLocator)
+from matplotlib.ticker import MultipleLocator, AutoMinorLocator
 import sys
 
 plt.rc("text", usetex=True)
@@ -22,7 +22,7 @@ with open("./config.yaml", "r") as config_file:
     config_data = yaml.safe_load(config_file)
 
 campaign_id = config_data["campaign_id"]
-assert(campaign_id == int(sys.argv[1])), "Make sure the campaign id match"
+assert campaign_id == int(sys.argv[1]), "Make sure the campaign id match"
 model_noise_cov = config_data["model_noise_cov"]
 data_file = config_data["data_file"]
 
@@ -33,15 +33,33 @@ num_data_points = no_noise_data.shape[0]
 training_data = np.copy(no_noise_data)
 
 # Adding noise
-noise = np.sqrt(model_noise_cov)*np.random.randn(num_data_points)
+noise = np.sqrt(model_noise_cov) * np.random.randn(num_data_points)
 training_data[:, -1] = np.log(training_data[:, -1]) + noise
-data_save_path = os.path.join("./campaign_results", "campaign_{0:d}/training_data.npy".format(campaign_id))
+data_save_path = os.path.join(
+    "./campaign_results", "campaign_{0:d}/training_data.npy".format(campaign_id)
+)
 np.save(data_save_path, training_data)
 
-fig_save_path = os.path.join("./campaign_results", "campaign_{0:d}/Figures/training_data.png".format(campaign_id))
+fig_save_path = os.path.join(
+    "./campaign_results", "campaign_{0:d}/Figures/training_data.png".format(campaign_id)
+)
 plt.figure(figsize=(8, 5))
-plt.scatter(1000/training_data[:, 0], np.log(no_noise_data[:, -1]), label="True", c="k", marker="s", s=50)
-plt.scatter(1000/training_data[:, 0], training_data[:, -1], label="Data", c="r", marker="D", s=50)
+plt.scatter(
+    1000 / training_data[:, 0],
+    np.log(no_noise_data[:, -1]),
+    label="True",
+    c="k",
+    marker="s",
+    s=50,
+)
+plt.scatter(
+    1000 / training_data[:, 0],
+    training_data[:, -1],
+    label="Data",
+    c="r",
+    marker="D",
+    s=50,
+)
 plt.xlabel(r"1000/T [1/K]")
 plt.ylabel(r"$\log(t_{ign})$")
 plt.legend(loc="lower right")
@@ -50,7 +68,6 @@ plt.grid(color="k", alpha=0.5)
 plt.tight_layout()
 plt.savefig(fig_save_path)
 plt.close()
-
 
 
 # # Add noise

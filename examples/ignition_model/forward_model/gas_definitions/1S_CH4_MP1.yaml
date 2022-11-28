@@ -108,7 +108,3 @@ reactions:
 - equation: CH4 + 2 O2 => CO2 + 2 H2O
   rate-constant: {A: 1.1e+10, b: 0, Ea: 20000}
   orders: {CH4: 1.0, O2: 0.5}
-
-
-
-

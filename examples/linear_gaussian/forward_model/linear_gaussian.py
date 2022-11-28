@@ -3,8 +3,9 @@ import os
 import shutil
 import matplotlib.pyplot as plt
 
-class linear_gaussian():
-    def __init__(self, true_theta=np.arange(1,4), spatial_res=100):
+
+class linear_gaussian:
+    def __init__(self, true_theta=np.arange(1, 4), spatial_res=100):
         self.spatial_res = spatial_res
         self.xtrain = np.linspace(-1, 1, self.spatial_res)
         self.true_theta = true_theta
@@ -17,7 +18,7 @@ class linear_gaussian():
         return vm
 
     def compute_prediction(self, theta):
-        return self.vm@theta.reshape(-1, 1)
+        return self.vm @ theta.reshape(-1, 1)
 
 
 def main():
@@ -44,11 +45,5 @@ def main():
     np.save(data_save_path, data)
 
 
-
-
-    
-
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
-    
-

@@ -1,4 +1,4 @@
-campaign_id: 1
+campaign_id: 2
 
 total_samples: 100
 num_samples: 100
@@ -6,15 +6,13 @@ num_samples: 100
 model_noise_cov: 1.0e-1
 objective_scaling: 1.0e-10
 
-# 
-compute_map: False 
+#
+compute_map: False
 compute_mle: False
+compute_post: True
 
 #
 compute_identifiability: True
 global_num_outer_samples: 10000
 global_num_inner_samples: 5000
 restart_identifiability: False
-
-
-
