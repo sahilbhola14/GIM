@@ -4,7 +4,7 @@ import yaml
 import sys
 import os
 import matplotlib.pyplot as plt
-from matplotlib.ticker import MultipleLocator, AutoMinorLocator
+from matplotlib.ticker import MultipleLocator
 from scipy.optimize import minimize
 from itertools import combinations
 
@@ -12,10 +12,10 @@ sys.path.append("../../../information_metrics/")
 sys.path.append("../forward_model/")
 sys.path.append("../../../mcmc/")
 from linear_gaussian import linear_gaussian
-from compute_identifiability import mutual_information, conditional_mutual_information
-from compute_sobol_indices import sobol_index
-from mcmc import *
-from mcmc_utils import *
+from compute_identifiability import conditional_mutual_information
+from SobolIndex import SobolIndex
+from mcmc import adaptive_metropolis_hastings
+from mcmc_utils import sub_sample_data
 
 plt.rc("text", usetex=True)
 plt.rc("font", family="serif", size=25)
@@ -250,7 +250,9 @@ class learn_linear_gaussian:
         print("Theoretical mutual informaiton : {}".format(mutual_information))
 
     def compute_true_individual_parameter_data_mutual_information(self):
-        """Function computes the true conditional mutual information for each parameter"""
+        """Function computes the true conditional mutual information for
+        each parameter
+        """
         # Definitions
         individual_mutual_information = np.zeros(self.num_parameters)
         evidence_mean, evidence_cov = self.compute_evidence_stats()
@@ -273,9 +275,9 @@ class learn_linear_gaussian:
             parameter_pair = np.array([iparameter])
             fixed_parameter_id = np.arange(self.num_parameters) != iparameter
 
-            selected_parameter_mean = self.prior_mean[parameter_pair].reshape(
-                parameter_pair.shape[0], 1
-            )
+            # selected_parameter_mean = self.prior_mean[parameter_pair].reshape(
+            #     parameter_pair.shape[0], 1
+            # )
             selected_parameter_cov = np.diag(np.diag(self.prior_cov)[parameter_pair])
 
             fixed_parameter_mean = self.prior_mean[fixed_parameter_id].reshape(
@@ -474,10 +476,36 @@ class learn_linear_gaussian:
             double_integral_gaussian_quad_pts=5,
         )
 
+    def compute_sobol_indices(self):
+        """Function computes the sobol indices"""
+
+        def forward_model(theta):
+            return self.compute_model_prediction(theta)
+
+        sobol_index = SobolIndex(
+            forward_model=forward_model,
+            prior_mean=self.prior_mean,
+            prior_cov=self.prior_cov,
+            global_num_outer_samples=self.global_num_outer_samples,
+            global_num_inner_samples=self.global_num_inner_samples,
+            # model_noise_cov_scalar=self.model_noise_cov,
+            model_noise_cov_scalar=0,
+            data_shape=(self.num_data_points, self.spatial_resolution),
+            write_log_file=True,
+            save_path=os.path.join(self.campaign_path, "SobolIndex"),
+        )
+
+        sobol_index.comp_first_order_sobol_indices()
+        sobol_index.comp_total_effect_sobol_indices()
+
     def plot_map_estimate(self, theta_map, theta_map_cov):
         num_samples = 1000
         theta = theta_map + np.linalg.cholesky(theta_map_cov) @ np.random.randn(
             self.num_parameters, num_samples
+        )
+
+        prediction_true = self.compute_model_prediction(
+            self.linear_gaussian_model.true_theta
         )
 
         prediction = np.zeros(self.ytrain.shape + (num_samples,))
@@ -490,6 +518,7 @@ class learn_linear_gaussian:
         prediction_std = np.std(prediction, axis=-1)
         sorted_prediction_mean = self.sort_prediction(prediction=prediction_mean)
         sorted_prediction_std = self.sort_prediction(prediction=prediction_std)
+        sorted_prediction_true = self.sort_prediction(prediction_true)
         upper_lim = sorted_prediction_mean + sorted_prediction_std
         lower_lim = sorted_prediction_mean - sorted_prediction_std
 
@@ -497,14 +526,17 @@ class learn_linear_gaussian:
 
         save_fig_path = os.path.join(self.campaign_path, "Figures/prediction_map.png")
         fig, axs = plt.subplots(figsize=(12, 6))
+        axs.scatter(
+            self.xtrain, self.ytrain.ravel(), c="k", s=30, zorder=-1, label="Data"
+        )
+        axs.plot(
+            sorted_input, sorted_prediction_true.ravel(), "--", label="True", color="k"
+        )
         axs.plot(
             sorted_input,
             sorted_prediction_mean.ravel(),
             color="r",
             label=r"$\mu_{prediction}$",
-        )
-        axs.scatter(
-            self.xtrain, self.ytrain.ravel(), c="k", s=30, zorder=-1, label="Data"
         )
         axs.fill_between(
             sorted_input,
@@ -532,13 +564,14 @@ class learn_linear_gaussian:
     def compute_mcmc_samples(self, theta_map, theta_map_cov):
         """Function computes the mcmc samples"""
 
-        compute_post = lambda theta: self.compute_unnormalized_posterior(theta)
+        def compute_post(theta):
+            return self.compute_unnormalized_posterior(theta)
 
         mcmc_sampler = adaptive_metropolis_hastings(
             initial_sample=theta_map.ravel(),
             target_log_pdf_evaluator=compute_post,
-            num_samples=100000,
-            adapt_sample_threshold=1000,
+            num_samples=200000,
+            adapt_sample_threshold=10000,
             initial_cov=1e-2 * theta_map_cov,
         )
 
@@ -546,13 +579,20 @@ class learn_linear_gaussian:
 
         # Compute acceptance rate
         ar = mcmc_sampler.compute_acceptance_ratio()
-        print("Acceptance rate: ", ar)
+        if rank == 0:
+            print("Acceptance rate: ", ar)
 
         # Compute the burn in samples
         burned_samples = sub_sample_data(
             mcmc_sampler.samples, frac_burn=0.5, frac_use=0.7
         )
-        np.save(os.path.join(self.campaign_path, "burned_samples.npy"), burned_samples)
+
+        np.save(
+            os.path.join(
+                self.campaign_path, "burned_samples_rank_{}_.npy".format(rank)
+            ),
+            burned_samples,
+        )
 
 
 def load_configuration_file(config_file_path="./config.yaml"):
@@ -592,7 +632,7 @@ def main():
     elif config_data["compute_post"]:
         theta_map = np.load(os.path.join(campaign_path, "theta_map.npy"))
         theta_map_cov = np.load(os.path.join(campaign_path, "theta_map_cov.npy"))
-        theta_post_mean, theta_post_cov = learning_model.compute_mcmc_samples(
+        learning_model.compute_mcmc_samples(
             theta_map=theta_map, theta_map_cov=theta_map_cov
         )
 
@@ -624,7 +664,10 @@ def main():
         # learning_model.compute_true_pair_parameter_data_mutual_information()
 
         # Estimated MI
-        learning_model.compute_esimated_mi()
+        # learning_model.compute_esimated_mi()
+
+        # Sobol indices
+        learning_model.compute_sobol_indices()
 
     if rank == 0:
         learning_model.log_file.close()
