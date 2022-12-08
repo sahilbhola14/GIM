@@ -132,7 +132,8 @@ class SobolIndex:
 
         Args:
             mean (float[num_parameters, 1]): Mean of the Gaussian distribution
-            cov (float[num_parameters, num_parameters]): Covariance of the Gaussian distribution
+            cov (float[num_parameters, num_parameters]): Covariance of the Gaussian
+            distribution
             num_samples (int): Number of samples
 
         Returns:
@@ -180,12 +181,51 @@ class SobolIndex:
         model_prediction = self._comp_model_prediction(outer_parameter_samples)
 
         # Compute Sobol denominator
-        sobol_denominator = np.var(model_prediction, axis=2)
+        unnormalized_mean_model_prediction = self._worker_num_outer_samples * np.mean(
+            model_prediction, axis=2
+        )
+
+        unnormalized_mean_model_prediction_list = COMM.gather(
+            unnormalized_mean_model_prediction, root=0
+        )
+
+        if RANK == 0:
+            global_mean_model_prediction = (
+                1 / self._global_num_outer_samples
+            ) * np.sum(unnormalized_mean_model_prediction_list, axis=0)
+            global_mean_model_prediction_list = [global_mean_model_prediction] * SIZE
+        else:
+            global_mean_model_prediction_list = None
+
+        COMM.Barrier()
+        local_mean_model_prediction = COMM.scatter(
+            global_mean_model_prediction_list, root=0
+        )
+
+        error = model_prediction - local_mean_model_prediction[:, :, np.newaxis]
+        unnormalized_mean_squared_error = self._worker_num_outer_samples * np.mean(
+            error**2, axis=2
+        )
+        unnormalized_mean_squation_error_list = COMM.gather(
+            unnormalized_mean_squared_error, root=0
+        )
+
+        if RANK == 0:
+            global_mean_squared_error = (1 / self._global_num_outer_samples) * np.sum(
+                unnormalized_mean_squation_error_list, axis=0
+            )
+            global_mean_squared_error_list = [global_mean_squared_error] * SIZE
+        else:
+            global_mean_squared_error_list = None
+
+        sobol_denominator = COMM.scatter(global_mean_squared_error_list, root=0)
+
         assert (
             sobol_denominator.shape == self._data_shape
         ), "Sobol denominator shape does not match"
         assert (sobol_denominator > 0).all(), "Sobol denominator should be positive"
         assert (sobol_denominator < np.inf).all(), "Sobol denominator should be finite"
+
         return sobol_denominator
 
     def _comp_inner_expectation(
@@ -197,7 +237,7 @@ class SobolIndex:
             Do not include the `self` parameter in the ``Args`` section.
 
         Args:
-            selected_parameter_id (int): Parameter id for which outer samples are computed
+            selected_parameter_id (int): Parameter id for outer samples
             outer_selected_parameter_samples (float): Samples of the selected parameter
 
         Returns:
@@ -249,6 +289,59 @@ class SobolIndex:
                 self._log_file.write(message + "\n")
                 self._log_file.flush()
 
+    def _comp_variance_of_inner_expectation(self, inner_expectation):
+        """Function to compute the variance of the inner Expectation
+        Args:
+            inner_expectation (float): Inner Expectation samples
+
+        Returns:
+            (float): Variance of the inner Expectation
+        """
+        unnormalized_mean_inner_expectation = self._worker_num_outer_samples * np.mean(
+            inner_expectation, axis=2
+        )
+
+        unnormalized_mean_inner_expectation_list = COMM.gather(
+            unnormalized_mean_inner_expectation, root=0
+        )
+
+        if RANK == 0:
+            global_mean_inner_expectation = (
+                1 / self._global_num_outer_samples
+            ) * np.sum(unnormalized_mean_inner_expectation_list, axis=0)
+            global_mean_inner_expectation_list = [global_mean_inner_expectation] * SIZE
+        else:
+            global_mean_inner_expectation_list = None
+
+        COMM.Barrier()
+        local_mean_inner_expectation = COMM.scatter(
+            global_mean_inner_expectation_list, root=0
+        )
+
+        error = inner_expectation - local_mean_inner_expectation[:, :, np.newaxis]
+        unnormalized_mean_squared_error = self._worker_num_outer_samples * np.mean(
+            error**2, axis=2
+        )
+        unnormalized_mean_squation_error_list = COMM.gather(
+            unnormalized_mean_squared_error, root=0
+        )
+
+        if RANK == 0:
+            global_mean_squared_error = (1 / self._global_num_outer_samples) * np.sum(
+                unnormalized_mean_squation_error_list, axis=0
+            )
+            global_mean_squared_error_list = [global_mean_squared_error] * SIZE
+        else:
+            global_mean_squared_error_list = None
+
+        COMM.Barrier()
+
+        variance_of_inner_expectation = COMM.scatter(
+            global_mean_squared_error_list, root=0
+        )
+
+        return variance_of_inner_expectation
+
     def comp_sobol_indices(self):
         """Compute the Sobol index
 
@@ -272,7 +365,6 @@ class SobolIndex:
             )
 
             selected_parameter_id = np.array([iparam])
-            # unselected_parameter_id = np.delete(np.arange(self._num_parameters), iparam)
 
             # Compute outer samples
             outer_selected_parameter_samples = self._comp_selected_parameter_samples(
@@ -285,7 +377,10 @@ class SobolIndex:
                 outer_selected_parameter_samples=outer_selected_parameter_samples,
             )
 
-            sobol_numerator[:, :, iparam] = np.var(inner_expectation, axis=2)
+            # Compute Variance of Inner Expectation
+            sobol_numerator[:, :, iparam] = self._comp_variance_of_inner_expectation(
+                inner_expectation
+            )
 
         # Compute the Sobol Denominator
         sobol_denominator = self._comp_sobol_denominator_via_samples()
