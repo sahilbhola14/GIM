@@ -17,6 +17,7 @@ class SobolIndex:
         prior_cov,
         global_num_outer_samples,
         global_num_inner_samples,
+        model_noise_cov_scalar,
         data_shape,
         save_path,
         write_log_file=False,
@@ -27,6 +28,7 @@ class SobolIndex:
         self._prior_cov = prior_cov
         self._global_num_outer_samples = global_num_outer_samples
         self._global_num_inner_samples = global_num_inner_samples
+        self._model_noise_cov_scalar = model_noise_cov_scalar
         self._data_shape = data_shape
         self._save_path = save_path
 
@@ -47,10 +49,13 @@ class SobolIndex:
         self._write_message_to_log_file(
             "Num Outer Samples(Global): {}".format(self._global_num_outer_samples)
         )
+
         self._write_message_to_log_file(
             "Num Inner Samples(Global): {}".format(self._global_num_inner_samples)
         )
+
         self._write_message_to_log_file("Num Procs: {}".format(SIZE))
+
         self._write_message_to_log_file(
             "Num Outer Samples(Worker): {}".format(self._worker_num_outer_samples)
         )
@@ -60,6 +65,10 @@ class SobolIndex:
 
         self._write_message_to_log_file(
             "Number of parameters: {}".format(self._num_parameters)
+        )
+
+        self._write_message_to_log_file(
+            "Model Noise Cov (scalar): {}".format(self._model_noise_cov_scalar)
         )
 
     def _create_save_path(self):
@@ -124,6 +133,29 @@ class SobolIndex:
 
         return model_prediction
 
+    def _sample_model_likelihood(self, theta):
+        """Function computes the model likelihood
+        Note:
+            Do not include the `self` parameter in the ``Args`` section.
+
+        Args:
+            theta (float[num_parameters, num_samples]): Parameter sample
+
+        Returns:
+            (float[num_samples, 1]): Model likelihood samples
+
+        """
+        assert theta.shape[0] == self._num_parameters, "Incorrect number of parameters"
+
+        num_samples = theta.shape[1]
+        noise_sample = np.sqrt(self._model_noise_cov_scalar) * np.random.randn(
+            self._data_shape[0], self._data_shape[1], num_samples
+        )
+        model_prediction = self._comp_model_prediction(theta)
+        likelihood_sample = model_prediction + noise_sample
+
+        return likelihood_sample
+
     def _sample_gaussian(self, mean, cov, num_samples):
         """Sample from a Gaussian distribution
 
@@ -178,11 +210,11 @@ class SobolIndex:
         )
 
         # Compute model prediction
-        model_prediction = self._comp_model_prediction(outer_parameter_samples)
+        model_likelihood = self._sample_model_likelihood(outer_parameter_samples)
 
         # Compute Sobol denominator
         unnormalized_mean_model_prediction = self._worker_num_outer_samples * np.mean(
-            model_prediction, axis=2
+            model_likelihood, axis=2
         )
 
         unnormalized_mean_model_prediction_list = COMM.gather(
@@ -202,7 +234,7 @@ class SobolIndex:
             global_mean_model_prediction_list, root=0
         )
 
-        error = model_prediction - local_mean_model_prediction[:, :, np.newaxis]
+        error = model_likelihood - local_mean_model_prediction[:, :, np.newaxis]
         unnormalized_mean_squared_error = self._worker_num_outer_samples * np.mean(
             error**2, axis=2
         )
@@ -258,11 +290,12 @@ class SobolIndex:
 
         for iouter in range(self._worker_num_outer_samples):
 
-            self._write_message_to_log_file(
-                " > Computing inner expectation for outer sample {}/{}".format(
-                    iouter + 1, self._worker_num_outer_samples
+            if iouter % 100 == 0 or iouter == self._worker_num_outer_samples - 1:
+                self._write_message_to_log_file(
+                    " > Computing inner expectation for outer sample {}/{}".format(
+                        iouter + 1, self._worker_num_outer_samples
+                    )
                 )
-            )
 
             # Compute model prediction
             theta = np.zeros((self._num_parameters, self._worker_num_inner_samples))
@@ -270,10 +303,10 @@ class SobolIndex:
                 :, iouter
             ]
             theta[unselected_parameter_id, :] = inner_unselected_parameter_samples
-            model_prediction = self._comp_model_prediction(theta)
+            model_likelihood = self._sample_model_likelihood(theta)
 
             # Compute inner expectation
-            inner_expectation[:, :, iouter] = np.mean(model_prediction, axis=2)
+            inner_expectation[:, :, iouter] = np.mean(model_likelihood, axis=2)
 
         return inner_expectation
 
@@ -288,6 +321,18 @@ class SobolIndex:
             else:
                 self._log_file.write(message + "\n")
                 self._log_file.flush()
+
+    def _save_data(self, data, filename):
+        """Saves data to a file
+        Args:
+            data (float): Data to be saved
+            filename (str): Filename
+        """
+        if RANK == 0:
+            file_path = os.path.join(self._save_path, filename)
+            np.save(file_path, data)
+        else:
+            pass
 
     def _comp_variance_of_inner_expectation(self, inner_expectation):
         """Function to compute the variance of the inner Expectation
@@ -391,3 +436,6 @@ class SobolIndex:
 
         self._write_message_to_log_file(message="Sobol index computation completed!")
         self._write_message_to_log_file(message="Sobol index: {}".format(sobol_index))
+
+        # Save the data
+        self._save_data(sobol_index, filename="sobol_index.npy")
