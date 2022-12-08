@@ -71,6 +71,10 @@ class SobolIndex:
             "Model Noise Cov (scalar): {}".format(self._model_noise_cov_scalar)
         )
 
+        # Compute the Sobol Denominator
+        self._write_message_to_log_file("Computing Sobol Denominator")
+        self._sobol_denominator = self._comp_sobol_denominator_via_samples()
+
     def _create_save_path(self):
         """Creates the save path"""
         if RANK == 0:
@@ -301,7 +305,7 @@ class SobolIndex:
             theta = np.zeros((self._num_parameters, self._worker_num_inner_samples))
             theta[selected_parameter_id, :] = outer_selected_parameter_samples[
                 :, iouter
-            ]
+            ].reshape(-1, 1)
             theta[unselected_parameter_id, :] = inner_unselected_parameter_samples
             model_likelihood = self._sample_model_likelihood(theta)
 
@@ -387,24 +391,22 @@ class SobolIndex:
 
         return variance_of_inner_expectation
 
-    def comp_sobol_indices(self):
-        """Compute the Sobol index
+    def comp_first_order_sobol_indices(self):
+        """Compute the First order Sobol index
+
+        Notes: Higher the value of the Sobol index, higher the sensitivity of the output
+        with respect to the parameter.
 
         Note:
             Do not include the `self` parameter in the ``Args`` section.
-
-        Returns:
-            (float[num_parameters, 1]): Sobol index
-
         """
         sobol_numerator = np.zeros(self._data_shape + (self._num_parameters,))
-        sobol_denominator = np.zeros(self._data_shape)
 
         # Compute the Sobol Numerator
         for iparam in range(self._num_parameters):
 
             self._write_message_to_log_file(
-                message="Computing Sobol numerator for parameter {}/{}".format(
+                message="Computing First order Sobol num. for parameter {}/{}".format(
                     iparam + 1, self._num_parameters
                 )
             )
@@ -427,11 +429,8 @@ class SobolIndex:
                 inner_expectation
             )
 
-        # Compute the Sobol Denominator
-        sobol_denominator = self._comp_sobol_denominator_via_samples()
-
         # Compute the Sobol Index
-        ratio = sobol_numerator / sobol_denominator[:, :, np.newaxis]
+        ratio = sobol_numerator / self._sobol_denominator[:, :, np.newaxis]
         sobol_index = np.mean(ratio, axis=(0, 1))
 
         self._write_message_to_log_file(message="Sobol index computation completed!")
@@ -439,3 +438,57 @@ class SobolIndex:
 
         # Save the data
         self._save_data(sobol_index, filename="sobol_index.npy")
+
+    def comp_total_effect_sobol_indices(self):
+        """Compute the Total effect Sobol index
+
+        Notes: Higher the value of the total effect Sobol index, that means that fixing
+        that parameter leads to `less` variability in the output. This means
+        that that parameter is `more` important.
+
+        Note:
+            Do not include the `self` parameter in the ``Args`` section.
+        """
+        sobol_numerator = np.zeros(self._data_shape + (self._num_parameters,))
+
+        # Compute the Sobol Numerator
+        for iparam in range(self._num_parameters):
+
+            self._write_message_to_log_file(
+                message="Computing Total Sobol numerator for parameter {}/{}".format(
+                    iparam + 1, self._num_parameters
+                )
+            )
+
+            selected_parameter_id = np.delete(np.arange(self._num_parameters), iparam)
+
+            # Compute outer samples
+            outer_selected_parameter_samples = self._comp_selected_parameter_samples(
+                parameter_id=selected_parameter_id,
+                num_samples=self._worker_num_outer_samples,
+            )
+
+            # Compute inner expectation for each outer selected parameter sample
+            inner_expectation = self._comp_inner_expectation(
+                selected_parameter_id=selected_parameter_id,
+                outer_selected_parameter_samples=outer_selected_parameter_samples,
+            )
+
+            # Compute Variance of Inner Expectation
+            sobol_numerator[:, :, iparam] = self._comp_variance_of_inner_expectation(
+                inner_expectation
+            )
+
+        # Compute the Total Sobol Index
+        ratio = sobol_numerator / self._sobol_denominator[:, :, np.newaxis]
+        sobol_index = 1 - np.mean(ratio, axis=(0, 1))
+
+        self._write_message_to_log_file(
+            message="Total Sobol index computation completed!"
+        )
+        self._write_message_to_log_file(
+            message="Total Sobol index: {}".format(sobol_index)
+        )
+
+        # Save the data
+        self._save_data(sobol_index, filename="total_sobol_index.npy")
