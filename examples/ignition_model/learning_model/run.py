@@ -1,12 +1,9 @@
 import numpy as np
-import time
 import matplotlib.pyplot as plt
-import pylab
 import yaml
 from scipy.optimize import minimize
 from matplotlib.ticker import MultipleLocator, AutoMinorLocator
 import sys
-import time
 import os
 from mpi4py import MPI
 
@@ -14,9 +11,10 @@ sys.path.append("../forward_model/methane_combustion")
 sys.path.append("../../../information_metrics")
 sys.path.append("../../../mcmc")
 from combustion import mech_1S_CH4_Westbrook, mech_2S_CH4_Westbrook, mech_gri
-from compute_identifiability import mutual_information, conditional_mutual_information
-from mcmc import *
-from mcmc_utils import *
+from compute_identifiability import conditional_mutual_information
+from SobolIndex import SobolIndex
+from mcmc import adaptive_metropolis_hastings
+from mcmc_utils import sub_sample_data
 from color_schemes import dark_colors
 
 comm = MPI.COMM_WORLD
@@ -208,7 +206,7 @@ class learn_ignition_model:
                     )
                     prediction[:, idata_sample, ii] = interpolated_temp
 
-                except:
+                except Exception:
                     prediction[:, idata_sample, ii] = np.nan * np.ones(3000)
 
         return prediction
@@ -237,41 +235,6 @@ class learn_ignition_model:
             prediction[:, idata_sample] = interpolated_temp
 
         return prediction
-
-        """Function computes the true species evolution"""
-        time_array = np.logspace(-6, 0, 3000)
-
-        for idata_sample in range(self.num_data_points):
-            initial_pressure = self.initial_pressure[idata_sample]
-            initial_temperature = self.initial_temperature[idata_sample]
-            equivalence_ratio = self.equivalence_ratio[idata_sample]
-
-            combustion_model = mech_gri(
-                initial_temperature=initial_temperature,
-                initial_pressure=initial_pressure,
-                equivalence_ratio=equivalence_ratio,
-            )
-
-            states, _ = combustion_model.gri_combustion()
-
-            prediction[:, 0, ii] = self.interpolate_state(
-                states.t, states("CH4").X.ravel(), interpolate_time=time_array
-            )
-            prediction[:, 1, ii] = self.interpolate_state(
-                states.t, states("CO2").X.ravel(), interpolate_time=time_array
-            )
-            prediction[:, 2, ii] = self.interpolate_state(
-                states.t, states("O2").X.ravel(), interpolate_time=time_array
-            )
-            prediction[:, 3, ii] = self.interpolate_state(
-                states.t, states("CO").X.ravel(), interpolate_time=time_array
-            )
-            prediction[:, 4, ii] = self.interpolate_state(
-                states.t, states("H2O").X.ravel(), interpolate_time=time_array
-            )
-            prediction[:, 5, ii] = self.interpolate_state(
-                states.t, states("N2").X.ravel(), interpolate_time=time_array
-            )
 
     def compute_species_evolution(
         self, theta_samples, initial_pressure, initial_temperature, equivalence_ratio
@@ -504,7 +467,8 @@ class learn_ignition_model:
             save_prediction_path,
             prediction_save,
             delimiter=" ",
-            header="Vartiables: Inital_temperature, Initial_pressure, Equivalence_ratio, Ignition_temperature",
+            header="Variables: Inital_temperature, Initial_pressure \
+            ,Equivalence_ratio, Ignition_temperature",
         )
         np.save(save_mle_path, theta_mle)
 
@@ -539,17 +503,8 @@ class learn_ignition_model:
     def compute_mcmc(self, theta_map, theta_map_cov, num_mcmc_samples):
         """Function computes the MCMC samples"""
 
-        # num_mcmc_samples_per_proc =  int(num_mcmc_samles/size)
-
-        compute_post = lambda theta: self.compute_unnormalized_posterior(theta)
-
-        # mcmc_sampler = metropolis_hastings(
-        #         initial_sample=theta_map.ravel(),
-        #         target_log_pdf_evaluator=compute_post,
-        #         num_samples=num_mcmc_samples_per_proc,
-        #         # adapt_sample_threshold=500,
-        #         initial_cov = 9e-3*theta_map_cov,
-        #         )
+        def compute_post(theta):
+            return self.compute_unnormalized_posterior(theta)
 
         mcmc_sampler = adaptive_metropolis_hastings(
             initial_sample=theta_map.ravel(),
@@ -577,30 +532,6 @@ class learn_ignition_model:
             burned_samples,
         )
 
-        # Plot the samples
-        # fig, axs = plot_chains(burned_samples, title="Adaptive Metropolis Hastings")
-        # plt.show()
-
-        # Plot the histogram
-        # labels = [r"$\theta_{0}$".format(i) for i in range(self.num_parameters)]
-        # fig, axs, gs = scatter_matrix([burned_samples], labels=labels,
-        #                         hist_plot=False, gamma=0.4)
-        # fig.set_size_inches(15, 15)
-        # plt.savefig(os.path.join(self.campaign_path, "mcmc_hist.png"), dpi=300)
-        # plt.show()
-
-        # burned_samples = sub_sample_data(mcmc_sampler.samples, frac_burn=0.6, frac_use=0.6)
-        # comm.Barrier()
-
-        # mcmc_samples = comm.gather(burned_samples, root=0)
-        # if rank == 0:
-        #     mcmc_samples = np.vstack(mcmc_samples)
-        #     save_mcmc_samples_path = os.path.join(self.campaign_path, "mcmc_samples.npy")
-        #     np.save(save_mcmc_samples_path, mcmc_samples)
-        #     prediction = self.compute_temperature_prediction(theta_samples=mcmc_samples.T)
-        #     save_mcmc_prediction_path = os.path.join(self.campaign_path, "mcmc_prediction.npy")
-        #     np.save(save_mcmc_prediction_path, prediction)
-
     def plot_mcmc_estimate(self, mcmc_samples=None):
         time_array = np.logspace(-6, 0, 3000)
 
@@ -615,7 +546,8 @@ class learn_ignition_model:
         plt.close()
 
         # Compute model prediction for ALL MCMC samples
-        # mcmc_prediction = self.compute_temperature_prediction(theta_samples=mcmc_samples.T)
+        # mcmc_prediction = self.compute_temperature_prediction(
+        # theta_samples=mcmc_samples.T)
         mcmc_prediction = np.load(
             os.path.join(self.campaign_path, "mcmc_prediction.npy")
         )
@@ -665,9 +597,8 @@ class learn_ignition_model:
                 dashes=[3, 2, 3, 2],
                 lw=3,
                 color=dark_colors(ii),
-                label=r"2-step mechanism [Westbrook $\textit{{et al.}}$], $T_{{o}}$={0:.1f} K".format(
-                    self.initial_temperature[ii]
-                ),
+                label=r"2-step mechanism [Westbrook $\textit{{et al.}}$],"
+                "$T_{{o}}$={0:.1f} K".format(self.initial_temperature[ii]),
             )
             axs.plot(
                 time_array,
@@ -747,9 +678,8 @@ class learn_ignition_model:
                 dashes=[2, 1, 2, 1],
                 lw=3,
                 color=dark_colors(idata),
-                label=r"2-step mechanism [Westbrook $\textit{{et al.}}$], $T_{{o}}$={0:.1f} K".format(
-                    self.initial_temperature[idata]
-                ),
+                label=r"2-step mechanism [Westbrook $\textit{{et al.}}$]"
+                "$T_{{o}}$={0:.1f} K".format(self.initial_temperature[idata]),
             )
             axs[0, 0].plot(
                 time_array,
@@ -1253,6 +1183,27 @@ class learn_ignition_model:
             double_integral_gaussian_quad_pts=10,
         )
 
+    def compute_sobol_index(self, prior_mean, prior_cov):
+        """Function computes the sobol index"""
+
+        def forward_model(theta):
+            return self.compute_model_prediction(theta).T
+
+        sobol_index = SobolIndex(
+            forward_model=forward_model,
+            prior_mean=prior_mean,
+            prior_cov=prior_cov,
+            global_num_outer_samples=self.global_num_outer_samples,
+            global_num_inner_samples=self.global_num_inner_samples,
+            model_noise_cov_scalar=self.model_noise_cov,
+            data_shape=(1, self.num_data_points),
+            write_log_file=True,
+            save_path=os.path.join(self.campaign_path, "SobolIndex"),
+        )
+
+        sobol_index.comp_first_order_sobol_indices()
+        sobol_index.comp_total_effect_sobol_indices()
+
 
 def load_configuration_file(config_file_path="./config.yaml"):
     """Function loads the configuration file"""
@@ -1323,6 +1274,13 @@ def main():
         theta_map = np.load(os.path.join(campaign_path, "theta_map.npy"))
         theta_map_cov = np.load(os.path.join(campaign_path, "theta_map_cov.npy"))
         learning_model.compute_model_identifiability(
+            prior_mean=theta_map, prior_cov=theta_map_cov
+        )
+
+    if config_data["compute_sobol_index"]:
+        theta_map = np.load(os.path.join(campaign_path, "theta_map.npy"))
+        theta_map_cov = np.load(os.path.join(campaign_path, "theta_map_cov.npy"))
+        learning_model.compute_sobol_index(
             prior_mean=theta_map, prior_cov=theta_map_cov
         )
 
