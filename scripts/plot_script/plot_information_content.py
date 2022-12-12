@@ -2,8 +2,9 @@ import numpy as np
 import os
 import seaborn as sns
 import matplotlib.pyplot as plt
-from itertools import combinations
-from matplotlib.ticker import MultipleLocator, AutoMinorLocator
+
+# from itertools import combinations
+from matplotlib.ticker import AutoMinorLocator
 
 sns.set_style("whitegrid")
 plt.rc("text", usetex=True)
@@ -11,7 +12,10 @@ plt.rc("font", family="serif", size=20)
 plt.rc("lines", linewidth=3)
 plt.rc("axes", labelpad=30, titlepad=20)
 plt.rc("legend", fontsize=18, framealpha=1.0)
-path = "/home/sbhola/Documents/CASLAB/GIM/examples/ignition_model/learning_model/campaign_results/campaign_1"
+path = (
+    "/home/sbhola/Documents/CASLAB/GIM/examples/ignition_model/"
+    "learning_model/campaign_results/campaign_1"
+)
 file_name = "estimated_individual_mutual_information.npy"
 mi = np.load(os.path.join(path, file_name))
 
