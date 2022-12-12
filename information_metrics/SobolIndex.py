@@ -75,6 +75,9 @@ class SobolIndex:
         self._write_message_to_log_file("Computing Sobol Denominator")
         self._sobol_denominator = self._comp_sobol_denominator_via_samples()
 
+        # Save the sobol denominator
+        self._save_data(self._sobol_denominator, "sobol_denominator.npy")
+
     def _create_save_path(self):
         """Creates the save path"""
         if RANK == 0:
@@ -326,17 +329,20 @@ class SobolIndex:
                 self._log_file.write(message + "\n")
                 self._log_file.flush()
 
-    def _save_data(self, data, filename):
+    def _save_data(self, data, filename, save_all_rank=False):
         """Saves data to a file
         Args:
             data (float): Data to be saved
             filename (str): Filename
         """
-        if RANK == 0:
-            file_path = os.path.join(self._save_path, filename)
-            np.save(file_path, data)
+        # File path
+        file_path = os.path.join(self._save_path, filename)
+
+        if save_all_rank is False:
+            if RANK == 0:
+                np.save(file_path, data)
         else:
-            pass
+            np.save(file_path, data)
 
     def _comp_variance_of_inner_expectation(self, inner_expectation):
         """Function to compute the variance of the inner Expectation
@@ -424,6 +430,15 @@ class SobolIndex:
                 outer_selected_parameter_samples=outer_selected_parameter_samples,
             )
 
+            # Save the inner expectation
+            self._save_data(
+                inner_expectation,
+                "first_order_inner_expectation_param_{}_rank_{}.npy".format(
+                    iparam + 1, RANK
+                ),
+                save_all_rank=True,
+            )
+
             # Compute Variance of Inner Expectation
             sobol_numerator[:, :, iparam] = self._comp_variance_of_inner_expectation(
                 inner_expectation
@@ -472,6 +487,15 @@ class SobolIndex:
             inner_expectation = self._comp_inner_expectation(
                 selected_parameter_id=selected_parameter_id,
                 outer_selected_parameter_samples=outer_selected_parameter_samples,
+            )
+
+            # Save the inner expectation
+            self._save_data(
+                inner_expectation,
+                "total_effect_inner_expectation_param_{}_rank_{}.npy".format(
+                    iparam + 1, RANK
+                ),
+                save_all_rank=True,
             )
 
             # Compute Variance of Inner Expectation
