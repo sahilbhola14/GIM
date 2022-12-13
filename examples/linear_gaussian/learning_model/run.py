@@ -467,13 +467,13 @@ class learn_linear_gaussian:
         )
 
         mi_estimator.compute_individual_parameter_data_mutual_information_via_mc(
-            use_quadrature=True, single_integral_gaussian_quad_pts=30
+            use_quadrature=True, single_integral_gaussian_quad_pts=50
         )
 
         mi_estimator.compute_posterior_pair_parameter_mutual_information(
             use_quadrature=True,
-            single_integral_gaussian_quad_pts=30,
-            double_integral_gaussian_quad_pts=5,
+            single_integral_gaussian_quad_pts=50,
+            double_integral_gaussian_quad_pts=50,
         )
 
     def compute_sobol_indices(self):
@@ -594,6 +594,61 @@ class learn_linear_gaussian:
             burned_samples,
         )
 
+    def compute_variance_convergence(self):
+        """Function computes the variance convergence"""
+
+        num_experiments = 10
+        # eval_global_num_samples = np.logspace(1, 6, 6).astype(int)
+        eval_global_num_samples = np.logspace(1, 2, 2).astype(int)
+
+        individual_mi = np.zeros(
+            (self.num_parameters, len(eval_global_num_samples), num_experiments)
+        )
+
+        for iexp in range(num_experiments):
+            if rank == 0:
+                print("Experiment: ", iexp)
+
+            for ii, global_num_samples in enumerate(eval_global_num_samples):
+
+                if rank == 0:
+                    print("Global num samples: ", global_num_samples)
+
+                est_cmi = conditional_mutual_information(
+                    forward_model=self.compute_model_prediction,
+                    prior_mean=self.prior_mean,
+                    prior_cov=self.prior_cov,
+                    model_noise_cov_scalar=self.model_noise_cov,
+                    global_num_outer_samples=global_num_samples,
+                    global_num_inner_samples=self.global_num_inner_samples,
+                    save_path=self.campaign_path,
+                    restart=self.restart_identifiability,
+                    ytrain=self.ytrain,
+                    log_file=self.log_file,
+                )
+
+                individual_estimator = (
+                    est_cmi.compute_individual_parameter_data_mutual_information_via_mc
+                )
+
+                individual_mi[:, ii, iexp] = individual_estimator(
+                    use_quadrature=True, single_integral_gaussian_quad_pts=50
+                )
+
+            # mi_estimator.compute_posterior_pair_parameter_mutual_information(
+            #     use_quadrature=True,
+            #     single_integral_gaussian_quad_pts=50,
+            #     double_integral_gaussian_quad_pts=50,
+            # )
+
+            if rank == 0:
+                np.save(
+                    os.path.join(
+                        self.campaign_path, "individual_mi_variance_convergence.npy"
+                    ),
+                    individual_mi,
+                )
+
 
 def load_configuration_file(config_file_path="./config.yaml"):
     """Function loads the configuration file"""
@@ -650,13 +705,13 @@ def main():
             theta_map=theta_map, theta_map_cov=theta_map_cov
         )
 
-    # Information content
-    if config_data["compute_identifiability"]:
-        theta_map = np.load(os.path.join(campaign_path, "theta_map.npy"))
-        theta_map_cov = np.load(os.path.join(campaign_path, "theta_map_cov.npy"))
+    # Update the prior distribution
+    theta_map = np.load(os.path.join(campaign_path, "theta_map.npy"))
+    theta_map_cov = np.load(os.path.join(campaign_path, "theta_map_cov.npy"))
+    learning_model.update_prior(theta_mean=theta_map, theta_cov=theta_map_cov)
 
-        # Update the prior
-        learning_model.update_prior(theta_mean=theta_map, theta_cov=theta_map_cov)
+    # Identifiability
+    if config_data["compute_identifiability"]:
 
         # True MI
         # learning_model.compute_true_mutual_information()
@@ -664,10 +719,13 @@ def main():
         # learning_model.compute_true_pair_parameter_data_mutual_information()
 
         # Estimated MI
-        # learning_model.compute_esimated_mi()
+        learning_model.compute_esimated_mi()
 
         # Sobol indices
-        learning_model.compute_sobol_indices()
+        # learning_model.compute_sobol_indices()
+
+    # Variance convergence
+    learning_model.compute_variance_convergence()
 
     if rank == 0:
         learning_model.log_file.close()
