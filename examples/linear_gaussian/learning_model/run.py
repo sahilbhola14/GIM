@@ -190,7 +190,7 @@ class learn_linear_gaussian:
         )
         axs.grid(True, axis="both", which="major", color="k", alpha=0.5)
         axs.grid(True, axis="both", which="minor", color="grey", alpha=0.3)
-        axs.set_xlabel("x")
+        axs.set_xlabel("d")
         axs.set_ylabel("y")
         axs.legend(framealpha=1.0)
         axs.set_title("M.L.E.")
@@ -530,9 +530,6 @@ class learn_linear_gaussian:
             self.xtrain, self.ytrain.ravel(), c="k", s=30, zorder=-1, label="Data"
         )
         axs.plot(
-            sorted_input, sorted_prediction_true.ravel(), "--", label="True", color="k"
-        )
-        axs.plot(
             sorted_input,
             sorted_prediction_mean.ravel(),
             color="r",
@@ -548,15 +545,19 @@ class learn_linear_gaussian:
             color="r",
             label=r"$\pm\sigma$",
         )
+
+        axs.plot(
+            sorted_input, sorted_prediction_true.ravel(), "--", label="True", color="k"
+        )
         axs.grid(True, axis="both", which="major", color="k", alpha=0.5)
         axs.grid(True, axis="both", which="minor", color="grey", alpha=0.3)
         axs.legend(framealpha=1.0)
-        axs.set_xlabel("x")
+        axs.set_xlabel("d")
         axs.set_ylabel("y")
         axs.set_ylim([-8, 8])
         axs.yaxis.set_minor_locator(MultipleLocator(1))
         axs.xaxis.set_minor_locator(MultipleLocator(0.25))
-        axs.set_title("Aggregate posterior prediction")
+        # axs.set_title("M.A.P. Prediction")
         plt.tight_layout()
         plt.savefig(save_fig_path)
         plt.close()
@@ -705,13 +706,13 @@ def main():
             theta_map=theta_map, theta_map_cov=theta_map_cov
         )
 
-    # Update the prior distribution
-    theta_map = np.load(os.path.join(campaign_path, "theta_map.npy"))
-    theta_map_cov = np.load(os.path.join(campaign_path, "theta_map_cov.npy"))
-    learning_model.update_prior(theta_mean=theta_map, theta_cov=theta_map_cov)
-
     # Identifiability
     if config_data["compute_identifiability"]:
+
+        # Update the prior distribution
+        theta_map = np.load(os.path.join(campaign_path, "theta_map.npy"))
+        theta_map_cov = np.load(os.path.join(campaign_path, "theta_map_cov.npy"))
+        learning_model.update_prior(theta_mean=theta_map, theta_cov=theta_map_cov)
 
         # True MI
         # learning_model.compute_true_mutual_information()
@@ -724,8 +725,8 @@ def main():
         # Sobol indices
         # learning_model.compute_sobol_indices()
 
-    # Variance convergence
-    learning_model.compute_variance_convergence()
+        # Variance convergence
+        # learning_model.compute_variance_convergence()
 
     if rank == 0:
         learning_model.log_file.close()
