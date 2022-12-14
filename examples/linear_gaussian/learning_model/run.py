@@ -571,8 +571,10 @@ class learn_linear_gaussian:
         mcmc_sampler = adaptive_metropolis_hastings(
             initial_sample=theta_map.ravel(),
             target_log_pdf_evaluator=compute_post,
-            num_samples=200000,
-            adapt_sample_threshold=10000,
+            # num_samples=200000,
+            # adapt_sample_threshold=10000,
+            num_samples=20,
+            adapt_sample_threshold=10,
             initial_cov=1e-2 * theta_map_cov,
         )
 
@@ -594,6 +596,8 @@ class learn_linear_gaussian:
             ),
             burned_samples,
         )
+
+        return burned_samples
 
     def compute_variance_convergence(self):
         """Function computes the variance convergence"""
@@ -650,6 +654,77 @@ class learn_linear_gaussian:
                     individual_mi,
                 )
 
+    def plot_aggregate_post(self, samples):
+        """Function plots the aggregate posterior"""
+        agg_prediction = np.zeros((self.ytrain.shape + (samples.shape[0],)))
+
+        prediction_true = self.compute_model_prediction(
+            self.linear_gaussian_model.true_theta
+        )
+
+        for i, sample in enumerate(samples):
+            agg_prediction[:, :, i] = self.compute_model_prediction(sample)
+
+        agg_prediction_list = comm.gather(agg_prediction, root=0)
+
+        if rank == 0:
+            agg_prediction_global = np.concatenate(agg_prediction_list, axis=2)
+
+            prediction_mean = np.mean(agg_prediction_global, axis=-1)
+            prediction_std = np.std(agg_prediction_global, axis=-1)
+            sorted_prediction_mean = self.sort_prediction(prediction=prediction_mean)
+            sorted_prediction_std = self.sort_prediction(prediction=prediction_std)
+            sorted_prediction_true = self.sort_prediction(prediction_true)
+            upper_lim = sorted_prediction_mean + sorted_prediction_std
+            lower_lim = sorted_prediction_mean - sorted_prediction_std
+
+            sorted_input = self.sort_input()
+
+            save_fig_path = os.path.join(
+                self.campaign_path, "Figures/prediction_agg_post.png"
+            )
+            fig, axs = plt.subplots(figsize=(12, 6))
+            axs.scatter(
+                self.xtrain, self.ytrain.ravel(), c="k", s=30, zorder=-1, label="Data"
+            )
+            axs.plot(
+                sorted_input,
+                sorted_prediction_mean.ravel(),
+                color="r",
+                label=r"$\mu_{prediction}$",
+            )
+            axs.fill_between(
+                sorted_input,
+                upper_lim.ravel(),
+                lower_lim.ravel(),
+                ls="--",
+                lw=2,
+                alpha=0.3,
+                color="r",
+                label=r"$\pm\sigma$",
+            )
+
+            axs.plot(
+                sorted_input,
+                sorted_prediction_true.ravel(),
+                "--",
+                label="True",
+                color="k",
+            )
+            axs.grid(True, axis="both", which="major", color="k", alpha=0.5)
+            axs.grid(True, axis="both", which="minor", color="grey", alpha=0.3)
+            axs.legend(framealpha=1.0, loc="lower right")
+            axs.set_xlabel("d")
+            axs.set_ylabel("y")
+            axs.set_ylim([-8, 8])
+            axs.yaxis.set_minor_locator(MultipleLocator(1))
+            axs.yaxis.set_major_locator(MultipleLocator(5))
+            axs.xaxis.set_minor_locator(MultipleLocator(0.25))
+            # axs.set_title("M.A.P. Prediction")
+            plt.tight_layout()
+            plt.savefig(save_fig_path)
+            plt.close()
+
 
 def load_configuration_file(config_file_path="./config.yaml"):
     """Function loads the configuration file"""
@@ -688,9 +763,11 @@ def main():
     elif config_data["compute_post"]:
         theta_map = np.load(os.path.join(campaign_path, "theta_map.npy"))
         theta_map_cov = np.load(os.path.join(campaign_path, "theta_map_cov.npy"))
-        learning_model.compute_mcmc_samples(
+        samples = learning_model.compute_mcmc_samples(
             theta_map=theta_map, theta_map_cov=theta_map_cov
         )
+
+        learning_model.plot_aggregate_post(samples)
 
     if "--plotmle" in sys.argv:
         theta_mle = np.load(os.path.join(campaign_path, "theta_mle.npy"))
