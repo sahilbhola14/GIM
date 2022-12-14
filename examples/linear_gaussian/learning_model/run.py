@@ -678,6 +678,15 @@ class learn_linear_gaussian:
             upper_lim = sorted_prediction_mean + sorted_prediction_std
             lower_lim = sorted_prediction_mean - sorted_prediction_std
 
+            np.save(
+                os.path.join(self.campaign_path, "agg_prediction_mean.npy"),
+                sorted_prediction_mean,
+            )
+            np.save(
+                os.path.join(self.campaign_path, "agg_prediction_std.npy"),
+                sorted_prediction_std,
+            )
+
             sorted_input = self.sort_input()
 
             save_fig_path = os.path.join(
