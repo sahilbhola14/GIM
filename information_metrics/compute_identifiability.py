@@ -8,7 +8,6 @@ import sys
 from itertools import combinations
 import os
 import shutil
-import matplotlib.pyplot as plt
 
 sys.path.append("/home/sbhola/Documents/CASLAB/GIM/quadrature")
 from quadrature import unscented_quadrature, gauss_hermite_quadrature
@@ -145,7 +144,8 @@ class mutual_information:
 
     def get_selected_parameter_stats(self, parameter_pair):
         """Function selectes the parameter pair
-        Assumptions: parameters are assumed to be uncorrelated (prior to observing the data)"""
+        Assumptions: parameters are assumed to be uncorrelated
+        (prior to observing the data)"""
         mean = self.prior_mean[parameter_pair, :].reshape(parameter_pair.shape[0], 1)
         cov = np.diag(np.diag(self.prior_cov)[parameter_pair])
         return mean, cov
@@ -382,7 +382,8 @@ class mutual_information:
     def integrate_likelihood_via_quadrature(
         self, quadrature_rule, num_gaussian_quad_pts
     ):
-        """Function integrates the likelihood to estimate the evidence using quadratures"""
+        """Function integrates the likelihood to estimate the evidence
+        using quadratures"""
         # Definitions
         evidence_prob, is_evidence_prob_avail = self.load_restart_data(
             data_type="inner", label="evidence_prob", sub_type="MI"
@@ -467,7 +468,8 @@ class mutual_information:
 
     def likelihood_integrand(self, theta, outer_sample):
         """Function returns the integrand evaluated at the quadrature points
-        NOTE: shape of the model prediction should be :(num_data_samples, spatial_res, num_samples)"""
+        NOTE: shape of the model prediction should be :
+        (num_data_samples, spatial_res, num_samples)"""
         model_prediction = self.compute_model_prediction(theta=theta)
         pre_exp = 1 / (
             (2 * np.pi * self.model_noise_cov_scalar) ** (self.spatial_res / 2)
@@ -606,7 +608,8 @@ class conditional_mutual_information(mutual_information):
     def compute_individual_parameter_data_mutual_information_via_mc(
         self, use_quadrature=False, single_integral_gaussian_quad_pts=60
     ):
-        """Function computes the mutual information between each parameter theta_i and data Y given rest of the parameters"""
+        """Function computes the mutual information between each parameter theta_i
+        and data Y given rest of the parameters"""
         # Definitions
         if os.path.exists("estimated_individual_mutual_information.npy"):
             inidividual_mutual_information = np.load(
@@ -619,7 +622,8 @@ class conditional_mutual_information(mutual_information):
             ">>>-----------------------------------------------------------<<<"
         )
         self.write_log_file(
-            ">>> Begin computing the individual parameter mutual information, I(theta_i;Y|theta_[rest of parameters])"
+            ">>> Begin computing the individual parameter mutual information, "
+            "I(theta_i;Y|theta_[rest of parameters])"
         )
         self.write_log_file(
             ">>>-----------------------------------------------------------<<<\n"
@@ -773,8 +777,11 @@ class conditional_mutual_information(mutual_information):
         )
 
         self.write_log_file(
-            ">>> End computing the individual parameter mutual information, I(theta_i;Y)"
+            ">>> End computing the individual parameter mutual information,"
+            "I(theta_i;Y)"
         )
+
+        return inidividual_mutual_information
 
     def compute_posterior_pair_parameter_mutual_information(
         self,
@@ -782,7 +789,8 @@ class conditional_mutual_information(mutual_information):
         single_integral_gaussian_quad_pts=60,
         double_integral_gaussian_quad_pts=30,
     ):
-        """Function computes the posterior mutual information between parameters, I(theta_i;theta_j|Y, theta_k)"""
+        """Function computes the posterior mutual information between parameters,
+        I(theta_i;theta_j|Y, theta_k)"""
         # Definitions
         parameter_combinations = np.array(
             list(combinations(np.arange(self.num_parameters), 2))
@@ -797,14 +805,16 @@ class conditional_mutual_information(mutual_information):
             ">>>-----------------------------------------------------------<<<"
         )
         self.write_log_file(
-            ">>> Begin computing the pair parameter mutual information, I(theta_i;theta_j|Y, theta_[rest of parameters])"
+            ">>> Begin computing the pair parameter mutual information,"
+            "I(theta_i;theta_j|Y, theta_[rest of parameters])"
         )
         self.write_log_file(
             ">>>-----------------------------------------------------------<<<\n"
         )
 
         self.write_log_file(
-            "Use_quadrature : {} with single intergral quad pts: {} and double integral quad pts : {}(x2)".format(
+            "Use_quadrature : {} with single intergral quad pts: {} and double "
+            "integral quad pts : {}(x2)".format(
                 use_quadrature,
                 single_integral_gaussian_quad_pts,
                 double_integral_gaussian_quad_pts,
@@ -909,9 +919,8 @@ class conditional_mutual_information(mutual_information):
                 is_individual_likelihood_parameter_counter_avail,
             ) = self.load_restart_data(
                 data_type="inner",
-                label="pair_outer_counter_individual_likelihood_parameter_pair_{}_{}".format(
-                    parameter_pair[0], parameter_pair[1]
-                ),
+                label="pair_outer_counter_individual_likelihood_parameter_pair_"
+                "{}_{}".format(parameter_pair[0], parameter_pair[1]),
                 sub_type="PCMI",
             )
 
@@ -942,7 +951,8 @@ class conditional_mutual_information(mutual_information):
             for ii, iparameter in enumerate(parameter_pair[lower_parameter_loop_idx:]):
 
                 self.write_log_file(
-                    "Computing individual likelihood (sampling theta_{}), p(y|theta_{}, theta_[rest of parameters])".format(
+                    "Computing individual likelihood (sampling theta_{}), "
+                    "p(y|theta_{}, theta_[rest of parameters])".format(
                         iparameter, parameter_pair[parameter_pair != iparameter]
                     )
                 )
@@ -964,23 +974,22 @@ class conditional_mutual_information(mutual_information):
                 self.save_restart_data(
                     data=local_individual_likelihood,
                     data_type="inner",
-                    label="pair_outer_individual_likelihood_parameter_pair_{}_{}".format(
-                        parameter_pair[0], parameter_pair[1]
-                    ),
+                    label="pair_outer_individual_likelihood_parameter_pair"
+                    "_{}_{}".format(parameter_pair[0], parameter_pair[1]),
                     sub_type="PCMI",
                 )
 
                 self.save_restart_data(
                     data=individual_likelihood_parameter_counter,
                     data_type="inner",
-                    label="pair_outer_counter_individual_likelihood_parameter_pair_{}_{}".format(
-                        parameter_pair[0], parameter_pair[1]
-                    ),
+                    label="pair_outer_counter_individual_likelihood_parameter_pair_"
+                    "{}_{}".format(parameter_pair[0], parameter_pair[1]),
                     sub_type="PCMI",
                 )
 
                 self.write_log_file(
-                    "End computing individual likelihood (sampling theta_{}), p(y|theta_{}, theta_[rest of parameters])".format(
+                    "End computing individual likelihood (sampling theta_{}), "
+                    "p(y|theta_{}, theta_[rest of parameters])".format(
                         iparameter, parameter_pair[parameter_pair != iparameter]
                     )
                 )
@@ -989,7 +998,8 @@ class conditional_mutual_information(mutual_information):
             local_log_individual_likelihood = np.log(local_individual_likelihood)
 
             self.write_log_file(
-                "Computing pair likelihood (sampling theta_{} and theta_{}), p(y|theta_[rest of parameters])".format(
+                "Computing pair likelihood (sampling theta_{} and theta_{}),"
+                "p(y|theta_[rest of parameters])".format(
                     parameter_pair[0], parameter_pair[1]
                 )
             )
@@ -1008,7 +1018,8 @@ class conditional_mutual_information(mutual_information):
             comm.Barrier()
 
             self.write_log_file(
-                "End computing pair likelihood (sampling theta_{} and theta_{}), p(y|theta_[rest of parameters])\n".format(
+                "End computing pair likelihood (sampling theta_{} and theta_{}),"
+                "p(y|theta_[rest of parameters])\n".format(
                     parameter_pair[0], parameter_pair[1]
                 )
             )
@@ -1067,21 +1078,23 @@ class conditional_mutual_information(mutual_information):
             )
         )
 
-    def estimate_pair_likelihood(
-        self, parameter_pair, use_quadrature, quadrature_rule="gaussian"
-    ):
-        """Function commputes the pair likelihood defined as p(y|theta_{k})"""
-        if use_quadrature is True:
-            individual_likelihood_prob = (
-                self.integrate_individual_likelihood_via_quadrature(
-                    quadrature_rule=quadrature_rule, parameter_pair=parameter_pair
-                )
-            )
-        else:
-            individual_likelihood_prob = self.integrate_individual_likelihood_via_mc(
-                parameter_pair=parameter_pair
-            )
-        return individual_likelihood_prob
+        return pair_mutual_information
+
+    # def estimate_pair_likelihood(
+    #     self, parameter_pair, use_quadrature, quadrature_rule="gaussian"
+    # ):
+    #     """Function commputes the pair likelihood defined as p(y|theta_{k})"""
+    #     if use_quadrature is True:
+    #         individual_likelihood_prob = (
+    #             self.integrate_individual_likelihood_via_quadrature(
+    #                 quadrature_rule=quadrature_rule, parameter_pair=parameter_pair
+    #             )
+    #         )
+    #     else:
+    #         individual_likelihood_prob = self.integrate_individual_likelihood_via_mc(
+    #             parameter_pair=parameter_pair
+    #         )
+    #     return individual_likelihood_prob
 
     def estimate_individual_likelihood(
         self,
@@ -1094,15 +1107,14 @@ class conditional_mutual_information(mutual_information):
     ):
         """Function commputes the individual likelihood defined as p(y|theta_{-i})"""
         if use_quadrature is True:
-            individual_likelihood_prob = (
-                self.integrate_individual_likelihood_via_quadrature(
-                    quadrature_rule=quadrature_rule,
-                    parameter_pair=parameter_pair,
-                    num_gaussian_quad_pts=num_gaussian_quad_pts,
-                    case_type=case_type,
-                    parent_pair=parent_pair,
-                    importance_sampling_cov_factors=[1e-3, 1e-6],
-                )
+            quad_est = self.integrate_individual_likelihood_via_quadrature
+            individual_likelihood_prob = quad_est(
+                quadrature_rule=quadrature_rule,
+                parameter_pair=parameter_pair,
+                num_gaussian_quad_pts=num_gaussian_quad_pts,
+                case_type=case_type,
+                parent_pair=parent_pair,
+                importance_sampling_cov_factors=[1e-3, 1e-6],
             )
         else:
             assert self.restart is False, "Error"
@@ -1188,19 +1200,31 @@ class conditional_mutual_information(mutual_information):
             sub_type = "ICMI"
         elif case_type == "pair":
             if parameter_pair.shape[0] == 1:
-                likelihood_file_name = "pair_inner_likelihood_parameter_pair_{}_{}_sample_parameter_{}".format(
-                    parent_pair[0], parent_pair[1], sample_parameter_idx.item()
+                likelihood_file_name = (
+                    "pair_inner_likelihood_parameter_pair_{}_{}_"
+                    "sample_parameter_{}".format(
+                        parent_pair[0], parent_pair[1], sample_parameter_idx.item()
+                    )
                 )
-                counter_file_name = "pair_inner_counter_parameter_pair_{}_{}_sample_parameter_{}".format(
-                    parent_pair[0], parent_pair[1], sample_parameter_idx.item()
+                counter_file_name = (
+                    "pair_inner_counter_parameter_pair_{}_{}_"
+                    "sample_parameter_{}".format(
+                        parent_pair[0], parent_pair[1], sample_parameter_idx.item()
+                    )
                 )
                 sub_type = "PCMI"
             elif parameter_pair.shape[0] == 2:
-                likelihood_file_name = "pair_inner_likelihood_parameter_pair_{}_{}_sample_parameters_{}_and_{}".format(
-                    parent_pair[0], parent_pair[1], parent_pair[0], parent_pair[1]
+                likelihood_file_name = (
+                    "pair_inner_likelihood_parameter_pair_{}_{}_"
+                    "sample_parameters_{}_and_{}".format(
+                        parent_pair[0], parent_pair[1], parent_pair[0], parent_pair[1]
+                    )
                 )
-                counter_file_name = "pair_inner_counter_parameter_pair_{}_{}_sample_parameters_{}_and_{}".format(
-                    parent_pair[0], parent_pair[1], parent_pair[0], parent_pair[1]
+                counter_file_name = (
+                    "pair_inner_counter_parameter_pair_{}_{}_"
+                    "sample_parameters_{}_and_{}".format(
+                        parent_pair[0], parent_pair[1], parent_pair[0], parent_pair[1]
+                    )
                 )
                 sub_type = "PCMI"
             else:
@@ -1301,22 +1325,27 @@ class conditional_mutual_information(mutual_information):
                             sample_parameter_mean.shape[0]
                         )
 
+                        extracted_sample = self.local_outer_prior_samples[
+                            sample_parameter_idx, isample
+                        ]
+
                         unscented_quad = unscented_quadrature(
                             mean=self.get_sample_centered_mean(
-                                sample_parameter_extracted_sample=self.local_outer_prior_samples[
-                                    sample_parameter_idx, isample
-                                ]
+                                sample_parameter_extracted_sample=extracted_sample,
                             ),
                             cov=sample_parameter_cov * cov_multiplication_factor,
                             integrand=integrand,
                         )
 
                         def proposal_density_estimator(eval_points):
+
+                            extracted_sample = self.local_outer_prior_samples[
+                                sample_parameter_idx, isample
+                            ]
+
                             probability = self.compute_gaussian_prob(
                                 mean=self.get_sample_centered_mean(
-                                    sample_parameter_extracted_sample=self.local_outer_prior_samples[
-                                        sample_parameter_idx, isample
-                                    ]
+                                    sample_parameter_extracted_sample=extracted_sample,
                                 ),
                                 cov=sample_parameter_cov * cov_multiplication_factor,
                                 samples=eval_points,
@@ -1325,12 +1354,12 @@ class conditional_mutual_information(mutual_information):
 
                         quadrature_points = unscented_quad.compute_quadrature_points()
 
-                        importance_sampling_weights = (
-                            self.compute_importance_sampling_weights(
-                                target_density_estimator=target_density_estimator,
-                                proposal_density_estimator=proposal_density_estimator,
-                                eval_points=quadrature_points,
-                            )
+                        imp_samp_weight_est = self.compute_importance_sampling_weights
+
+                        importance_sampling_weights = imp_samp_weight_est(
+                            target_density_estimator=target_density_estimator,
+                            proposal_density_estimator=proposal_density_estimator,
+                            eval_points=quadrature_points,
                         )
 
                         (
@@ -1370,11 +1399,13 @@ class conditional_mutual_information(mutual_information):
                             sample_parameter_mean.shape[0]
                         )
 
+                        extracted_sample = self.local_outer_prior_samples[
+                            sample_parameter_idx, isample
+                        ]
+
                         gh = gauss_hermite_quadrature(
                             mean=self.get_sample_centered_mean(
-                                sample_parameter_extracted_sample=self.local_outer_prior_samples[
-                                    sample_parameter_idx, isample
-                                ]
+                                sample_parameter_extracted_sample=extracted_sample,
                             ),
                             cov=sample_parameter_cov * cov_multiplication_factor,
                             integrand=integrand,
@@ -1382,11 +1413,14 @@ class conditional_mutual_information(mutual_information):
                         )
 
                         def proposal_density_estimator(eval_points):
+
+                            extracted_sample = self.local_outer_prior_samples[
+                                sample_parameter_idx, isample
+                            ]
+
                             probability = self.compute_gaussian_prob(
                                 mean=self.get_sample_centered_mean(
-                                    sample_parameter_extracted_sample=self.local_outer_prior_samples[
-                                        sample_parameter_idx, isample
-                                    ]
+                                    sample_parameter_extracted_sample=extracted_sample,
                                 ),
                                 cov=sample_parameter_cov * cov_multiplication_factor,
                                 samples=eval_points,
@@ -1398,12 +1432,12 @@ class conditional_mutual_information(mutual_information):
                             _,
                         ) = gh.compute_quadrature_points_and_weights()
 
-                        importance_sampling_weights = (
-                            self.compute_importance_sampling_weights(
-                                target_density_estimator=target_density_estimator,
-                                proposal_density_estimator=proposal_density_estimator,
-                                eval_points=quadrature_points,
-                            )
+                        imp_samp_weight_est = self.compute_importance_sampling_weights
+
+                        importance_sampling_weights = imp_samp_weight_est(
+                            target_density_estimator=target_density_estimator,
+                            proposal_density_estimator=proposal_density_estimator,
+                            eval_points=quadrature_points,
                         )
 
                         individual_likelihood_prob[isample] = gh.compute_integeral(
@@ -1490,7 +1524,8 @@ class conditional_mutual_information(mutual_information):
         return sample_parameter_extracted_sample.reshape(-1, 1)
 
     def compute_gaussian_prob(self, mean, cov, samples):
-        """Function evaluates the proabability of the samples given the normal distribution"""
+        """Function evaluates the proabability of the samples given the normal
+        distribution"""
         d = mean.shape[0]
         error = mean - samples
         exp_term = np.exp(-0.5 * np.diag(error.T @ np.linalg.solve(cov, error)))
