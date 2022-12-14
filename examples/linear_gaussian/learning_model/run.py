@@ -610,6 +610,11 @@ class learn_linear_gaussian:
             (self.num_parameters, len(eval_global_num_samples), num_experiments)
         )
 
+        num_combinations = len(list(combinations(np.arange(self.num_parameters), 2)))
+        pair_mi = np.zeros(
+            (num_combinations, eval_global_num_samples.shape[0], num_experiments)
+        )
+
         for iexp in range(num_experiments):
             if rank == 0:
                 print("Experiment: ", iexp)
@@ -636,15 +641,23 @@ class learn_linear_gaussian:
                     est_cmi.compute_individual_parameter_data_mutual_information_via_mc
                 )
 
+                pair_mi_estimator = (
+                    est_cmi.compute_posterior_pair_parameter_mutual_information
+                )
+
                 individual_mi[:, ii, iexp] = individual_estimator(
                     use_quadrature=True, single_integral_gaussian_quad_pts=50
                 )
 
-            # mi_estimator.compute_posterior_pair_parameter_mutual_information(
-            #     use_quadrature=True,
-            #     single_integral_gaussian_quad_pts=50,
-            #     double_integral_gaussian_quad_pts=50,
-            # )
+                pair_mi[:, ii, iexp] = pair_mi_estimator(
+                    use_quadrature=True,
+                    single_integral_gaussian_quad_pts=50,
+                    double_integral_gaussian_quad_pts=50,
+                )
+
+                if rank == 0:
+                    print("Individual MI: ", individual_mi[:, ii, iexp])
+                    print("Pair MI: ", pair_mi[:, ii, iexp])
 
             if rank == 0:
                 np.save(
@@ -652,6 +665,87 @@ class learn_linear_gaussian:
                         self.campaign_path, "individual_mi_variance_convergence.npy"
                     ),
                     individual_mi,
+                )
+
+                np.save(
+                    os.path.join(
+                        self.campaign_path, "pair_mi_variance_convergence.npy"
+                    ),
+                    pair_mi,
+                )
+
+    def compute_bias_convergence(self):
+        """Function computes the bias convergence"""
+
+        num_experiments = 10
+
+        eval_quad_points = np.array([5, 10])
+
+        individual_mi = np.zeros(
+            (self.num_parameters, len(eval_quad_points), num_experiments)
+        )
+        num_combinations = len(list(combinations(np.arange(self.num_parameters), 2)))
+        pair_mi = np.zeros((num_combinations, len(eval_quad_points), num_experiments))
+
+        for iexp in range(num_experiments):
+            if rank == 0:
+                print("Experiment: ", iexp)
+
+            for ii, quad_points in enumerate(eval_quad_points):
+
+                if rank == 0:
+                    print("Single quad pts: ", quad_points)
+                    print(
+                        "Total Double quad pts" "(after tensorize): ", quad_points**2
+                    )
+
+                est_cmi = conditional_mutual_information(
+                    forward_model=self.compute_model_prediction,
+                    prior_mean=self.prior_mean,
+                    prior_cov=self.prior_cov,
+                    model_noise_cov_scalar=self.model_noise_cov,
+                    global_num_outer_samples=10000,
+                    global_num_inner_samples=self.global_num_inner_samples,
+                    save_path=self.campaign_path,
+                    restart=self.restart_identifiability,
+                    ytrain=self.ytrain,
+                    log_file=self.log_file,
+                )
+
+                individual_estimator = (
+                    est_cmi.compute_individual_parameter_data_mutual_information_via_mc
+                )
+
+                pair_mi_estimator = (
+                    est_cmi.compute_posterior_pair_parameter_mutual_information
+                )
+
+                individual_mi[:, ii, iexp] = individual_estimator(
+                    use_quadrature=True,
+                    single_integral_gaussian_quad_pts=quad_points,
+                )
+
+                pair_mi[:, ii, iexp] = pair_mi_estimator(
+                    use_quadrature=True,
+                    single_integral_gaussian_quad_pts=quad_points,
+                    double_integral_gaussian_quad_pts=quad_points,
+                )
+
+                if rank == 0:
+                    print("Individual MI: ", individual_mi[:, ii, iexp])
+                    print("Pair MI: ", pair_mi[:, ii, iexp])
+
+            if rank == 0:
+                np.save(
+                    os.path.join(
+                        self.campaign_path, "individual_mi_bias_convergence.npy"
+                    ),
+                    individual_mi,
+                )
+
+                np.save(
+                    os.path.join(self.campaign_path, "pair_mi_bias_convergence.npy"),
+                    pair_mi,
                 )
 
     def plot_aggregate_post(self, samples):
@@ -806,13 +900,16 @@ def main():
         # learning_model.compute_true_pair_parameter_data_mutual_information()
 
         # Estimated MI
-        learning_model.compute_esimated_mi()
+        # learning_model.compute_esimated_mi()
 
         # Sobol indices
         # learning_model.compute_sobol_indices()
 
         # Variance convergence
-        # learning_model.compute_variance_convergence()
+        learning_model.compute_variance_convergence()
+
+        # Bias convergence
+        # learning_model.compute_bias_convergence()
 
     if rank == 0:
         learning_model.log_file.close()
