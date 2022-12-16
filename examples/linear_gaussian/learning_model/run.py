@@ -27,12 +27,25 @@ size = comm.Get_size()
 
 
 class learn_linear_gaussian:
-    def __init__(self, config_data, campaign_path, prior_mean, prior_cov):
+    def __init__(
+        self,
+        config_data,
+        campaign_path,
+        prior_mean,
+        prior_cov,
+        use_normalization_coeff=False,
+        normalization_coeff=None,
+    ):
         self.prior_mean = prior_mean
         self.prior_cov = prior_cov
 
         self.prior_cov = prior_cov
         self.num_parameters = self.prior_mean.shape[0]
+        if use_normalization_coeff is True:
+            assert normalization_coeff is not None, "Normalization coeff is None"
+            self.normalization_coeff = normalization_coeff
+        else:
+            self.normalization_coeff = np.ones(self.num_parameters)
 
         # Extract configurations
         self.campaign_path = campaign_path
@@ -72,8 +85,12 @@ class learn_linear_gaussian:
         self.sample_idx_mat[np.arange(self.spatial_resolution), self.sample_idx] = 1
         self.forward_model = self.linear_gaussian_model.compute_prediction
 
-    def compute_model_prediction(self, theta, proc_log_file=None):
-        prediction = self.forward_model(theta=theta)[self.sample_idx, :].T
+    def compute_model_prediction(self, theta, proc_log_file=None, true_theta=False):
+        if true_theta is True:
+            normalized_theta = theta
+        else:
+            normalized_theta = theta * self.normalization_coeff
+        prediction = self.forward_model(theta=normalized_theta)[self.sample_idx, :].T
         return prediction
 
     def sort_prediction(self, prediction):
@@ -117,7 +134,7 @@ class learn_linear_gaussian:
         prediction = self.compute_model_prediction(theta=res.x)
         prediction_data = np.zeros((self.spatial_resolution, 2))
         prediction_data[:, 0] = self.xtrain
-        prediction_data[:, 1] = prediction
+        prediction_data[:, 1] = prediction.ravel()
 
         save_prediction_path = os.path.join(self.campaign_path, "prediction_mle.npy")
         save_mle_path = os.path.join(self.campaign_path, "theta_mle.npy")
@@ -171,7 +188,7 @@ class learn_linear_gaussian:
     def plot_mle_estimate(self, theta_mle):
         prediction = self.compute_model_prediction(theta_mle)
         prediction_true = self.compute_model_prediction(
-            self.linear_gaussian_model.true_theta
+            self.linear_gaussian_model.true_theta, true_theta=True
         )
 
         sorted_prediction = self.sort_prediction(prediction)
@@ -488,8 +505,8 @@ class learn_linear_gaussian:
             prior_cov=self.prior_cov,
             global_num_outer_samples=self.global_num_outer_samples,
             global_num_inner_samples=self.global_num_inner_samples,
-            # model_noise_cov_scalar=self.model_noise_cov,
-            model_noise_cov_scalar=0,
+            model_noise_cov_scalar=self.model_noise_cov,
+            # model_noise_cov_scalar=0.0,
             data_shape=(self.num_data_points, self.spatial_resolution),
             write_log_file=True,
             save_path=os.path.join(self.campaign_path, "SobolIndex"),
@@ -505,7 +522,8 @@ class learn_linear_gaussian:
         )
 
         prediction_true = self.compute_model_prediction(
-            self.linear_gaussian_model.true_theta
+            self.linear_gaussian_model.true_theta,
+            true_theta=True,
         )
 
         prediction = np.zeros(self.ytrain.shape + (num_samples,))
@@ -838,9 +856,33 @@ def load_configuration_file(config_file_path="./config.yaml"):
     return config_data
 
 
+def compute_normalization_coefficient(individual_mi, pair_mi):
+    num_parameters = len(individual_mi)
+    alpha = individual_mi / np.sum(individual_mi)
+
+    parameter_comb = np.array(list(combinations(np.arange(num_parameters), 2)))
+    mat = np.zeros((num_parameters, num_parameters))
+
+    for ii in range(parameter_comb.shape[0]):
+
+        mat[parameter_comb[ii, 0], parameter_comb[ii, 1]] = pair_mi[ii]
+        mat[parameter_comb[ii, 1], parameter_comb[ii, 0]] = pair_mi[ii]
+
+    beta = np.sum(mat, axis=1) / np.sum(mat)
+    gamma_unnormalized = alpha / (alpha + beta)
+    gamma = gamma_unnormalized / np.sum(gamma_unnormalized)
+
+    return gamma
+
+
 def main():
     prior_mean = np.zeros((3, 1))
     prior_cov = np.eye(3)
+
+    gamma_coeff = compute_normalization_coefficient(
+        individual_mi=[3.43029824, 2.85712464, 2.59584844],
+        pair_mi=[-4.20996571e-18, 1.45196126e00, -9.15001408e-18],
+    )
 
     # Load the config data
     config_data = load_configuration_file()
@@ -857,6 +899,8 @@ def main():
         campaign_path=campaign_path,
         prior_mean=prior_mean,
         prior_cov=prior_cov,
+        use_normalization_coeff=True,
+        normalization_coeff=gamma_coeff,
     )
 
     if config_data["compute_mle"]:
@@ -890,9 +934,9 @@ def main():
     if config_data["compute_identifiability"]:
 
         # Update the prior distribution
-        theta_map = np.load(os.path.join(campaign_path, "theta_map.npy"))
-        theta_map_cov = np.load(os.path.join(campaign_path, "theta_map_cov.npy"))
-        learning_model.update_prior(theta_mean=theta_map, theta_cov=theta_map_cov)
+        # theta_map = np.load(os.path.join(campaign_path, "theta_map.npy"))
+        # theta_map_cov = np.load(os.path.join(campaign_path, "theta_map_cov.npy"))
+        # learning_model.update_prior(theta_mean=theta_map, theta_cov=theta_map_cov)
 
         # True MI
         # learning_model.compute_true_mutual_information()
@@ -903,10 +947,10 @@ def main():
         # learning_model.compute_esimated_mi()
 
         # Sobol indices
-        # learning_model.compute_sobol_indices()
+        learning_model.compute_sobol_indices()
 
         # Variance convergence
-        learning_model.compute_variance_convergence()
+        # learning_model.compute_variance_convergence()
 
         # Bias convergence
         # learning_model.compute_bias_convergence()
