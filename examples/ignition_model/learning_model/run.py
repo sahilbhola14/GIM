@@ -6,6 +6,7 @@ from matplotlib.ticker import MultipleLocator, AutoMinorLocator
 import sys
 import os
 from mpi4py import MPI
+from itertools import combinations
 
 sys.path.append("../forward_model/methane_combustion")
 sys.path.append("../../../information_metrics")
@@ -33,12 +34,25 @@ plt.rc("ytick.minor", size=4)
 
 
 class learn_ignition_model:
-    def __init__(self, config_data, campaign_path, prior_mean, prior_cov):
+    def __init__(
+        self,
+        config_data,
+        campaign_path,
+        prior_mean,
+        prior_cov,
+        use_normalization_coeff=False,
+        normalization_coeff=None,
+    ):
         """Atribute initialization"""
         # Prior
         self.prior_mean = prior_mean
         self.prior_cov = prior_cov
         self.num_parameters = self.prior_mean.shape[0]
+        if use_normalization_coeff:
+            assert normalization_coeff is not None, "Normalization coeff not provided"
+            self.normalization_coeff = normalization_coeff
+        else:
+            self.normalization_coeff = np.ones(self.num_parameters)
 
         # Extract configurations
         self.campaign_path = campaign_path
@@ -125,8 +139,13 @@ class learn_ignition_model:
             raise ValueError("Number of parameters in the model not supported")
         return Arrhenius_Ea
 
-    def compute_model_prediction(self, theta, proc_log_file=None):
+    def compute_model_prediction(self, theta, proc_log_file=None, true_theta=False):
         """Function computes the model prediction, Temperature"""
+        if true_theta:
+            normalized_theta = theta
+        else:
+            normalized_theta = theta * self.normalization_coeff
+
         prediction = np.zeros((self.num_data_points, self.spatial_resolution))
 
         for idata_sample in range(self.num_data_points):
@@ -137,7 +156,7 @@ class learn_ignition_model:
 
             # Compute the kinetic parameters
             kinetic_parameters = self.compute_kinetic_parameters(
-                theta, initial_temperature, equivalence_ratio
+                normalized_theta, initial_temperature, equivalence_ratio
             )
 
             if proc_log_file is not None:
@@ -1214,6 +1233,25 @@ def load_configuration_file(config_file_path="./config.yaml"):
     return config_data
 
 
+def compute_normalization_coefficient(individual_mi, pair_mi):
+    num_parameters = len(individual_mi)
+    alpha = individual_mi / np.sum(individual_mi)
+
+    parameter_comb = np.array(list(combinations(np.arange(num_parameters), 2)))
+    mat = np.zeros((num_parameters, num_parameters))
+
+    for ii in range(parameter_comb.shape[0]):
+
+        mat[parameter_comb[ii, 0], parameter_comb[ii, 1]] = pair_mi[ii]
+        mat[parameter_comb[ii, 1], parameter_comb[ii, 0]] = pair_mi[ii]
+
+    beta = np.sum(mat, axis=1) / np.sum(mat)
+    gamma_unnormalized = alpha / (alpha + beta)
+    gamma = gamma_unnormalized / np.sum(gamma_unnormalized)
+
+    return gamma
+
+
 def main():
     # Load the configurations
     config_data = load_configuration_file()
@@ -1222,10 +1260,14 @@ def main():
     num_model_parameters = config_data["n_parameter_model"]
     prior_mean = np.zeros(num_model_parameters)
     prior_cov = np.eye(num_model_parameters)
-
     # Campaign path
     campaign_path = os.path.join(
         os.getcwd(), "campaign_results/campaign_%d" % (config_data["campaign_id"])
+    )
+
+    gamma_coefficient = compute_normalization_coefficient(
+        individual_mi=[2.73662068, 1.26551743, 1.26228971],
+        pair_mi=[1.13192122, 1.13670414, 0.73127758],
     )
 
     # Learning model
@@ -1234,6 +1276,8 @@ def main():
         campaign_path=campaign_path,
         prior_mean=prior_mean,
         prior_cov=prior_cov,
+        use_normalization_coeff=True,
+        normalization_coeff=gamma_coefficient,
     )
 
     if config_data["compute_mle"]:
