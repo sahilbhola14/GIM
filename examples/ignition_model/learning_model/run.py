@@ -185,11 +185,16 @@ class learn_ignition_model:
 
         return prediction
 
-    def compute_temperature_prediction(self, theta_samples):
+    def compute_temperature_prediction(self, theta_samples, true_theta=False):
         """Function computes the model prediction, Temperature"""
         time_array = np.logspace(-6, 0, 3000)
 
         num_theta_samples = theta_samples.shape[1]
+
+        if true_theta:
+            normalized_theta = theta_samples
+        else:
+            normalized_theta = theta_samples * self.normalization_coeff[:, None]
 
         prediction = np.zeros((3000, 4, num_theta_samples))
         for ii in range(num_theta_samples):
@@ -199,23 +204,22 @@ class learn_ignition_model:
                 ),
                 flush=True,
             )
+
             for idata_sample in range(self.num_data_points):
                 initial_pressure = self.initial_pressure[idata_sample]
                 initial_temperature = self.initial_temperature[idata_sample]
                 equivalence_ratio = self.equivalence_ratio[idata_sample]
 
-                # Compute the Arrehnius rate
-                Arrhenius_A = self.compute_Arrehenius_A(
-                    theta=theta_samples[:, ii],
-                    equivalence_ratio=equivalence_ratio,
-                    initial_temperature=initial_temperature,
+                kinetic_parameters = self.compute_kinetic_parameters(
+                    normalized_theta[:, ii], initial_temperature, equivalence_ratio
                 )
 
                 combustion_model = mech_2S_CH4_Westbrook(
                     initial_temperature=initial_temperature,
                     initial_pressure=initial_pressure,
                     equivalence_ratio=equivalence_ratio,
-                    Arrhenius_A=Arrhenius_A,
+                    Arrhenius_A=kinetic_parameters["A"],
+                    Arrhenius_Ea=kinetic_parameters["Ea"],
                 )
 
                 try:
@@ -256,7 +260,12 @@ class learn_ignition_model:
         return prediction
 
     def compute_species_evolution(
-        self, theta_samples, initial_pressure, initial_temperature, equivalence_ratio
+        self,
+        theta_samples,
+        initial_pressure,
+        initial_temperature,
+        equivalence_ratio,
+        true_theta=False,
     ):
         """Function computes the model prediction, species concentration"""
 
@@ -265,20 +274,23 @@ class learn_ignition_model:
         prediction_std = np.zeros((3000, 6))
         prediction = np.zeros((3000, 6, theta_samples.shape[1]))
 
+        if true_theta:
+            normalized_theta = theta_samples
+        else:
+            normalized_theta = theta_samples * self.normalization_coeff[:, None]
+
         for ii in range(theta_samples.shape[1]):
 
-            # Compute the Arrehnius rate
-            Arrhenius_A = self.compute_Arrehenius_A(
-                theta=theta_samples[:, ii],
-                equivalence_ratio=equivalence_ratio,
-                initial_temperature=initial_temperature,
+            kinetic_parameters = self.compute_kinetic_parameters(
+                normalized_theta[:, ii], initial_temperature, equivalence_ratio
             )
 
             combustion_model = mech_2S_CH4_Westbrook(
                 initial_temperature=initial_temperature,
                 initial_pressure=initial_pressure,
                 equivalence_ratio=equivalence_ratio,
-                Arrhenius_A=Arrhenius_A,
+                Arrhenius_A=kinetic_parameters["A"],
+                Arrhenius_Ea=kinetic_parameters["Ea"],
             )
 
             states, _ = combustion_model.mech_2S_CH4_Westbrook_combustion()
@@ -302,8 +314,21 @@ class learn_ignition_model:
                 states.t, states("N2").X.ravel(), interpolate_time=time_array
             )
 
-        prediction_mean = np.mean(prediction, axis=2)
-        prediction_std = np.std(prediction, axis=2)
+        # breakpoint()
+        # prediction_mean = np.mean(prediction, axis=2)
+        # prediction_std = np.std(prediction, axis=2)
+
+        # Compute the sample based mean
+        local_prediction_sum = np.sum(prediction, axis=2)
+        comm.Allreduce(local_prediction_sum, prediction_mean, op=MPI.SUM)
+        prediction_mean = prediction_mean / (theta_samples.shape[1] * size)
+
+        # Compute the sample based std
+        local_prediction_error_sq = np.sum(
+            (prediction - prediction_mean[:, :, None]) ** 2, axis=2
+        )
+        comm.Allreduce(local_prediction_error_sq, prediction_std, op=MPI.SUM)
+        prediction_std = np.sqrt(prediction_std / (theta_samples.shape[1] * size))
 
         return prediction_mean, prediction_std
 
@@ -552,23 +577,13 @@ class learn_ignition_model:
         )
 
     def plot_mcmc_estimate(self, mcmc_samples=None):
+
         time_array = np.logspace(-6, 0, 3000)
 
-        # Plotting MCMC samples
-        fig, axs = plt.subplots(self.num_parameters, 1, figsize=(15, 8))
-        fig_save_path = os.path.join(self.campaign_path, "Figures/mcmc_samples.png")
-        for i in range(self.num_parameters):
-            axs[i].plot(mcmc_samples[:, i], color="k")
-            axs[i].set_ylabel(r"$\Theta_{{{0:d}}}$".format(i + 1))
-        plt.tight_layout()
-        plt.savefig(fig_save_path)
-        plt.close()
-
         # Compute model prediction for ALL MCMC samples
-        # mcmc_prediction = self.compute_temperature_prediction(
-        # theta_samples=mcmc_samples.T)
-        mcmc_prediction = np.load(
-            os.path.join(self.campaign_path, "mcmc_prediction.npy")
+        test_samples = mcmc_samples[:10, :]
+        mcmc_prediction = self.compute_temperature_prediction(
+            theta_samples=test_samples.T
         )
 
         # Compute feasibile samples
@@ -584,7 +599,7 @@ class learn_ignition_model:
             feasible_idx.append(idx)
 
         # Plot temperature prediction for feasible samples
-        fig, axs = plt.subplots(1, 1, figsize=(15, 8))
+        fig, axs = plt.subplots(1, 1, figsize=(20, 8))
         fig_save_path = os.path.join(self.campaign_path, "Figures/mcmc_prediction.png")
 
         true_temperature_prediction = self.compute_true_temperature_prediction()
@@ -594,63 +609,89 @@ class learn_ignition_model:
 
         for ii in range(self.num_data_points):
 
+            global_selected_data_mean = np.zeros_like(time_array)
+            global_selected_data_std = np.zeros_like(time_array)
+
             sub_data = mcmc_prediction[:, ii, :]
             selected_data = sub_data[:, feasible_idx[ii]]
-            mean = np.mean(selected_data, axis=1)
-            std = np.std(selected_data, axis=1)
-            ub = mean + std
-            lb = mean - std
-            axs.plot(
-                time_array,
-                true_temperature_prediction[:, ii],
-                "-",
-                color=dark_colors(ii),
-                label="Gri-Mech 3.0, $T_{{o}}$={0:.1f} K".format(
-                    self.initial_temperature[ii]
-                ),
+            local_selected_data_sum = np.sum(selected_data, axis=1)
+            comm.Allreduce(
+                local_selected_data_sum, global_selected_data_mean, op=MPI.SUM
             )
-            axs.plot(
-                time_array,
-                temperature_prediction_2S_Westbrook[:, ii],
-                "-",
-                dashes=[3, 2, 3, 2],
-                lw=3,
-                color=dark_colors(ii),
-                label=r"2-step mechanism [Westbrook $\textit{{et al.}}$],"
-                "$T_{{o}}$={0:.1f} K".format(self.initial_temperature[ii]),
-            )
-            axs.plot(
-                time_array,
-                mean,
-                "-",
-                dashes=[6, 2, 2, 2],
-                color=dark_colors(ii),
-                lw=3,
-                label=r"$\mu_{{post}}$, $T_{{o}}$={0:.1f} K".format(
-                    self.initial_temperature[ii]
-                ),
-            )
-            axs.fill_between(
-                np.logspace(-6, 0, 3000),
-                ub,
-                lb,
-                ls="-",
-                lw=2,
-                color=dark_colors(ii),
-                alpha=0.2,
-            )
+            global_selected_data_mean /= test_samples.shape[0] * size
 
-        axs.grid(True, axis="both", which="major", color="k", alpha=0.5)
-        axs.grid(True, axis="both", which="minor", color="grey", alpha=0.3)
-        axs.set_xscale("log")
-        axs.set_ylim([1000, 4000])
-        axs.set_xlim([1e-6, 1])
-        axs.set_xlabel("Time [s]")
-        axs.set_ylabel("Temperature [K]")
-        plt.subplots_adjust(left=0.15, right=0.9, top=0.68, bottom=0.15)
-        plt.legend(ncol=2, bbox_to_anchor=(0.525, 1.125, 0.5, 0.5))
-        plt.savefig(fig_save_path)
-        plt.close()
+            local_selected_data_error_square_sum = np.sum(
+                (selected_data - global_selected_data_mean[:, None]) ** 2, axis=1
+            )
+            comm.Allreduce(
+                local_selected_data_error_square_sum,
+                global_selected_data_std,
+                op=MPI.SUM,
+            )
+            global_selected_data_std /= test_samples.shape[0] * size
+            global_selected_data_std = np.sqrt(global_selected_data_std)
+
+            if rank == 0:
+
+                ub = global_selected_data_mean + global_selected_data_std
+                lb = global_selected_data_mean - global_selected_data_std
+
+                axs.plot(
+                    time_array,
+                    true_temperature_prediction[:, ii],
+                    "-",
+                    color=dark_colors(ii),
+                    label="Gri-Mech 3.0, $T_{{o}}$={0:.1f} K".format(
+                        self.initial_temperature[ii]
+                    ),
+                )
+                axs.plot(
+                    time_array,
+                    temperature_prediction_2S_Westbrook[:, ii],
+                    "-",
+                    dashes=[3, 2, 3, 2],
+                    lw=3,
+                    color=dark_colors(ii),
+                    label=r"2-step mechanism [Westbrook $\textit{{et al.}}$],"
+                    "$T_{{o}}$={0:.1f} K".format(self.initial_temperature[ii]),
+                )
+                axs.plot(
+                    time_array,
+                    global_selected_data_mean,
+                    "-",
+                    dashes=[6, 2, 2, 2],
+                    color=dark_colors(ii),
+                    lw=3,
+                    label=r"$\mu_{{prediction}}$, $T_{{o}}$={0:.1f} K".format(
+                        self.initial_temperature[ii]
+                    ),
+                )
+                axs.fill_between(
+                    np.logspace(-6, 0, 3000),
+                    ub,
+                    lb,
+                    ls="-",
+                    lw=2,
+                    color=dark_colors(ii),
+                    alpha=0.2,
+                    label=r"$\pm\sigma_{{prediction}}$, $T_{{o}}$={0:.1f} K".format(
+                        self.initial_temperature[ii]
+                    ),
+                )
+
+        if rank == 0:
+            axs.grid(True, axis="both", which="major", color="k", alpha=0.5)
+            axs.grid(True, axis="both", which="minor", color="grey", alpha=0.3)
+            axs.set_xscale("log")
+            axs.set_ylim([1000, 4000])
+            axs.set_xlim([1e-6, 1])
+            axs.set_xlabel("Time [s]")
+            axs.set_ylabel("Temperature [K]")
+            plt.subplots_adjust(left=0.1, right=0.65, top=0.7, bottom=0.15)
+            fig.legend(loc="upper center", bbox_to_anchor=(0.82, 0.8), ncol=1)
+            # plt.legend(ncol=2, bbox_to_anchor=(0.525, 1.125, 0.5, 0.5))
+            plt.savefig(fig_save_path, bbox_inches="tight")
+            plt.close()
 
         # Plot species prediciton for feasible samples
         species_true_prediction = self.compute_true_species_evolution()
@@ -662,7 +703,7 @@ class learn_ignition_model:
             initial_temperature = self.initial_temperature[idata]
             initial_pressure = self.initial_pressure[idata]
             equivalence_ratio = self.equivalence_ratio[idata]
-            theta_samples = mcmc_samples[feasible_idx[idata], :].T
+            theta_samples = test_samples[feasible_idx[idata], :].T
 
             species_mean, species_std = self.compute_species_evolution(
                 theta_samples=theta_samples,
@@ -674,7 +715,7 @@ class learn_ignition_model:
             species_prediction_mean[:, :, idata] = species_mean
             species_prediction_std[:, :, idata] = species_std
 
-        fig, axs = plt.subplots(2, 3, figsize=(19, 10))
+        fig, axs = plt.subplots(2, 3, figsize=(20, 12))
         fig.tight_layout(h_pad=3.3, w_pad=3.3)
         fig_save_path = os.path.join(
             self.campaign_path, "Figures/mcmc_species_prediction.png"
@@ -706,7 +747,7 @@ class learn_ignition_model:
                 "-",
                 dashes=[6, 2, 2, 2],
                 color=dark_colors(idata),
-                label=r"$\mu_{{post}}$, $T_{{o}}$={0:.1f} K".format(
+                label=r"$\mu_{{prediction}}$, $T_{{o}}$={0:.1f} K".format(
                     self.initial_temperature[idata]
                 ),
             )
@@ -720,6 +761,9 @@ class learn_ignition_model:
                 lw=2,
                 color=dark_colors(idata),
                 alpha=0.2,
+                label=r"$\pm\sigma_{{prediction}}$, $T_{{o}}$={0:.1f} K".format(
+                    self.initial_temperature[idata]
+                ),
             )
             axs[0, 0].set_xlabel(r"Time [s]")
             axs[0, 0].set_ylabel(r"[$CH_{4}$]")
@@ -961,9 +1005,153 @@ class learn_ignition_model:
             axs[1, 2].grid(True, axis="both", which="minor", color="grey", alpha=0.3)
 
         handles, labels = axs[0, 0].get_legend_handles_labels()
-        fig.legend(handles, labels, bbox_to_anchor=(0.35, 0.5, 0.5, 0.5), ncol=2)
+        fig.legend(
+            handles,
+            labels,
+            loc="upper center",
+            bbox_to_anchor=(1.2, 0.75),
+            ncol=1,
+            fontsize=25,
+        )
         plt.subplots_adjust(top=0.73, bottom=0.12, left=0.1, right=0.95)
-        plt.savefig(fig_save_path)
+        plt.savefig(fig_save_path, bbox_inches="tight", dpi=300)
+        plt.close()
+
+        # Plot the ignition delay
+
+        num_samples = 8
+        temperature_range = np.linspace(833, 2500, num_samples)
+        save_fig_path = os.path.join(
+            self.campaign_path, "Figures/ignition_delay_mcmc.png"
+        )
+
+        local_ignition_prediction = np.zeros(
+            (temperature_range.shape[0], test_samples.shape[0])
+        )
+
+        for ii in range(test_samples.shape[0]):
+            for jj, itemp in enumerate(temperature_range):
+                normalized_theta = test_samples[ii, :] * self.normalization_coeff
+
+                # Compute the kinetic parameters
+                kinetic_parameters = self.compute_kinetic_parameters(
+                    normalized_theta, itemp, 1.0
+                )
+
+                combustion_model = mech_2S_CH4_Westbrook(
+                    initial_temperature=itemp,
+                    initial_pressure=100000,
+                    equivalence_ratio=1.0,
+                    Arrhenius_A=kinetic_parameters["A"],
+                    Arrhenius_Ea=kinetic_parameters["Ea"],
+                )
+
+                local_ignition_prediction[jj, ii] = np.log(
+                    combustion_model.compute_ignition_time()
+                )
+
+        ignition_prediction_mean = np.zeros(num_samples)
+        ignition_prediction_std = np.zeros(num_samples)
+
+        local_ignition_prediction_sum = np.sum(local_ignition_prediction, axis=1)
+        comm.Allreduce(
+            local_ignition_prediction_sum, ignition_prediction_mean, op=MPI.SUM
+        )
+        ignition_prediction_mean /= size * test_samples.shape[0]
+
+        local_ignition_prediction_error_square_sum = np.sum(
+            (local_ignition_prediction - ignition_prediction_mean[:, None]) ** 2, axis=1
+        )
+        comm.Allreduce(
+            local_ignition_prediction_error_square_sum,
+            ignition_prediction_std,
+            op=MPI.SUM,
+        )
+        ignition_prediction_std /= size * test_samples.shape[0]
+        ignition_prediction_std = np.sqrt(ignition_prediction_std)
+
+        if rank == 0:
+            np.save(
+                os.path.join(self.campaign_path, "ignition_prediction_mean_mcmc.npy"),
+                ignition_prediction_mean,
+            )
+            np.save(
+                os.path.join(self.campaign_path, "ignition_prediction_std_mcmc.npy"),
+                ignition_prediction_std,
+            )
+
+        un_calibrated_model_prediction = np.zeros_like(temperature_range)
+        gri_prediction = np.zeros_like(temperature_range)
+        for ii, itemp in enumerate(temperature_range):
+            # Compute gri prediciton
+            gri_model = mech_gri(
+                initial_temperature=itemp,
+                initial_pressure=100000,
+                equivalence_ratio=1.0,
+            )
+            gri_prediction[ii] = np.log(gri_model.compute_ignition_time())
+
+            # Compute 2-step Westbrook prediction (uncalibrated)
+            model_2S_CH4_Westbrook = mech_2S_CH4_Westbrook(
+                initial_temperature=itemp,
+                initial_pressure=100000,
+                equivalence_ratio=1.0,
+            )
+
+            un_calibrated_model_prediction[ii] = np.log(
+                model_2S_CH4_Westbrook.compute_ignition_time(internal_state="plot")
+            )
+
+        fig, axs = plt.subplots(figsize=(11, 7))
+        axs.scatter(
+            1000 / self.initial_temperature,
+            self.ytrain.ravel(),
+            label="Data",
+            color="k",
+            marker="s",
+            s=100,
+        )
+        axs.plot(
+            1000 / temperature_range,
+            gri_prediction,
+            "--",
+            label="Gri-Mech 3.0",
+            color="k",
+        )
+        axs.plot(
+            1000 / temperature_range,
+            un_calibrated_model_prediction,
+            label=r"2-step mechanism [Westbrook \textit{et al.}]",
+            color="r",
+        )
+        axs.plot(
+            1000 / temperature_range,
+            ignition_prediction_mean,
+            label=r"$\mu_{prediction}$",
+            color="b",
+        )
+        axs.fill_between(
+            1000 / temperature_range,
+            ignition_prediction_mean + 3 * ignition_prediction_std,
+            ignition_prediction_mean - 3 * ignition_prediction_std,
+            ls="--",
+            edgecolor="C0",
+            lw=2,
+            alpha=0.3,
+            label=r"$\pm 3\sigma_{prediction}$",
+        )
+        axs.set_xlabel(r"1000/T [1/K]")
+        axs.set_ylabel(r"$\log(t_{ign})$")
+        axs.legend(loc="upper left")
+        axs.grid(True, axis="both", which="major", color="k", alpha=0.5)
+        axs.grid(True, axis="both", which="minor", color="grey", alpha=0.3)
+        axs.xaxis.set_minor_locator(MultipleLocator(0.05))
+        axs.xaxis.set_major_locator(MultipleLocator(0.2))
+        axs.yaxis.set_minor_locator(AutoMinorLocator())
+        axs.set_xlim([0.4, 1.2])
+        axs.set_ylim([-15, 10])
+        plt.tight_layout()
+        plt.savefig(save_fig_path, bbox_inches="tight", dpi=300)
         plt.close()
 
     def plot_map_estimate(self, theta_map, theta_map_cov):
@@ -1309,7 +1497,9 @@ def main():
         )
 
     elif "--plotmcmc" in sys.argv:
-        mcmc_samples = np.load(os.path.join(campaign_path, "mcmc_samples.npy"))
+        mcmc_samples = np.load(
+            os.path.join(campaign_path, "burned_samples_rank_{}_.npy".format(rank))
+        )
         learning_model.plot_mcmc_estimate(
             mcmc_samples=mcmc_samples,
         )
