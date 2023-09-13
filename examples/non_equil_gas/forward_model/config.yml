@@ -1,0 +1,17 @@
+AMBIENT_TEMP: 10000. # (K)
+AMBIENT_PRESSURE: 10000. # (Pa)
+INITIAL_TEMP: 1000. # (K)
+SYSTEM: 'H2_H' # Options: H2_H, N2_N
+NUM_SPECIES: 2
+
+# Reduced order modeling
+NUM_BINS: 8
+
+# Training
+NUM_EPOCHS: 500
+REGULARIZATION_PARAM_1: 0
+REGULARIZATION_PARAM_2: 0
+LEARNING_RATE: 5.0e-1
+
+#Path
+BASE_PATH: '/home/sbhola/Documents/CASLAB/GIM/examples/non_equil_gas/forward_model'
