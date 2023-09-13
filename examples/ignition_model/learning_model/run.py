@@ -1,4 +1,6 @@
+import shutil
 import numpy as np
+import time
 import matplotlib.pyplot as plt
 import yaml
 from scipy.optimize import minimize
@@ -16,6 +18,7 @@ from compute_identifiability import conditional_mutual_information
 from SobolIndex import SobolIndex
 from mcmc import adaptive_metropolis_hastings
 from mcmc_utils import sub_sample_data
+
 from color_schemes import dark_colors
 
 comm = MPI.COMM_WORLD
@@ -1411,6 +1414,51 @@ class learn_ignition_model:
         sobol_index.comp_first_order_sobol_indices()
         sobol_index.comp_total_effect_sobol_indices()
 
+    def compute_sobol_input_predictions(self):
+        """Function to compute the model predictions for the input Sobol parameters
+        Note: The parameters are generated using the Saltelli sampling scheme
+        """
+        input_file = os.path.join(
+            "sobol_samples", "sobol_input_samples_rank_{}.npy".format(rank)
+        )
+        assert os.path.exists(input_file), "Input file does not exist"
+        input_samples = np.load(input_file)
+        num_inputs = input_samples.shape[0]
+        print("Number of inputs: {} at RANK : {}".format(num_inputs, rank), flush=True)
+        output_samples = np.zeros(
+            (self.num_data_points, self.spatial_resolution, num_inputs)
+        )
+
+        tic = time.time()
+        for isample in range(num_inputs):
+            if rank == 0:
+                print(
+                    "Computing the model prediction for input sample: {} / {}".format(
+                        isample, num_inputs - 1
+                    )
+                )
+            output_samples[:, :, isample] = self.compute_model_prediction(
+                input_samples[isample, :]
+            )
+        print(
+            "Time taken to compute the model predictions: {} (RANK: {})".format(
+                time.time() - tic, rank
+            )
+        )
+
+        sobol_output_dir = os.path.join(self.campaign_path, "SALib_Sobol")
+        if rank == 0:
+            if not os.path.exists(sobol_output_dir):
+                os.makedirs(sobol_output_dir)
+            else:
+                shutil.rmtree(sobol_output_dir)
+                os.makedirs(sobol_output_dir)
+        comm.Barrier()
+        save_output_path = os.path.join(
+            sobol_output_dir, "sobol_output_samples_rank_{}.npy".format(rank)
+        )
+        np.save(save_output_path, output_samples)
+
 
 def load_configuration_file(config_file_path="./config.yaml"):
     """Function loads the configuration file"""
@@ -1464,7 +1512,7 @@ def main():
         campaign_path=campaign_path,
         prior_mean=prior_mean,
         prior_cov=prior_cov,
-        use_normalization_coeff=True,
+        use_normalization_coeff=False,
         normalization_coeff=gamma_coefficient,
     )
 
@@ -1512,11 +1560,12 @@ def main():
         )
 
     if config_data["compute_sobol_index"]:
-        theta_map = np.load(os.path.join(campaign_path, "theta_map.npy"))
-        theta_map_cov = np.load(os.path.join(campaign_path, "theta_map_cov.npy"))
-        learning_model.compute_sobol_index(
-            prior_mean=theta_map, prior_cov=theta_map_cov
-        )
+        learning_model.compute_sobol_input_predictions()
+        # theta_map = np.load(os.path.join(campaign_path, "theta_map.npy"))
+        # theta_map_cov = np.load(os.path.join(campaign_path, "theta_map_cov.npy"))
+        # learning_model.compute_sobol_index(
+        #     prior_mean=theta_map, prior_cov=theta_map_cov
+        # )
 
     if rank == 0:
         learning_model.log_file.close()
