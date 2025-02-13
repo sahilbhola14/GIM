@@ -1,0 +1,27 @@
+# Campaign
+campaign_id: 4
+
+# Forward model parameters
+
+# Learning model parameters
+n_parameter_model: 3
+data_file: ignition_time_gri_mech.dat # Used to generate the training data
+
+# data_file: ytrain.npy
+model_noise_cov: 1.0e-1
+objective_scaling: 1.0e-12
+
+# Leaning model
+compute_map: False
+compute_mle: False
+compute_mcmc: False
+
+# Identifiability
+compute_identifiability: False
+compute_sobol_index: True
+global_num_outer_samples: 10
+global_num_inner_samples: 5
+restart_identifiability: False
+
+# MCMC
+num_mcmc_samples: 50000

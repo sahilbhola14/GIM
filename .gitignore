@@ -1,0 +1,6 @@
+undodir/
+*npy
+*png
+*dat
+*ipynb
+__pycache__
